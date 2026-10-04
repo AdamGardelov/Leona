@@ -1,0 +1,536 @@
+[
+  {
+    "id": "sv-chat",
+    "text": "Förklara kort vad en API-nyckel är och varför man inte ska dela den.",
+    "expect": {
+      "language": "sv",
+      "contains_any": [
+        "nyckel"
+      ],
+      "no_tools": true
+    }
+  },
+  {
+    "id": "en-plan",
+    "text": "Give me a three-step plan for learning basic SQL. Keep it short.",
+    "expect": {
+      "language": "en",
+      "contains_any": [
+        "select",
+        "query",
+        "table"
+      ],
+      "no_tools": true
+    }
+  },
+  {
+    "id": "math-without-tools",
+    "text": "Vad är 17 gånger 23? Svara med talet och en kort mening.",
+    "web": true,
+    "requires": [
+      "tools"
+    ],
+    "expect": {
+      "language": "sv",
+      "contains_any": [
+        "391"
+      ],
+      "no_tools": [
+        "search_web",
+        "read_page"
+      ]
+    }
+  },
+  {
+    "id": "web-sv-summary",
+    "text": "Sök på webben vad Ollama är och sammanfatta det i tre meningar.",
+    "web": true,
+    "requires": [
+      "tools",
+      "web"
+    ],
+    "expect": {
+      "language": "sv",
+      "tools": [
+        "search_web"
+      ],
+      "read_before_answer": true,
+      "contains_any": [
+        "modell",
+        "model",
+        "llm"
+      ]
+    }
+  },
+  {
+    "id": "web-en-summary",
+    "text": "Search the web for what SearXNG is and explain it briefly, based on a page you read.",
+    "web": true,
+    "requires": [
+      "tools",
+      "web"
+    ],
+    "expect": {
+      "language": "en",
+      "tools": [
+        "search_web"
+      ],
+      "read_before_answer": true,
+      "contains_any": [
+        "metasearch",
+        "search engine"
+      ]
+    }
+  },
+  {
+    "id": "web-direct-url",
+    "text": "Read https://en.wikipedia.org/wiki/SQLite and tell me in which year SQLite was first released.",
+    "web": true,
+    "requires": [
+      "tools",
+      "web"
+    ],
+    "expect": {
+      "language": "en",
+      "tools": [
+        "read_page"
+      ],
+      "contains_any": [
+        "2000"
+      ]
+    }
+  },
+  {
+    "id": "web-long-page-find",
+    "text": "On https://en.wikipedia.org/wiki/Python_(programming_language), find who created Python and in which year the first version was released.",
+    "web": true,
+    "requires": [
+      "tools",
+      "web"
+    ],
+    "expect": {
+      "language": "en",
+      "tools": [
+        "read_page"
+      ],
+      "contains_all": [
+        "Rossum",
+        "1991"
+      ]
+    }
+  },
+  {
+    "id": "files-list",
+    "text": "Vilka filer och mappar finns i min arbetsyta?",
+    "files": true,
+    "requires": [
+      "tools"
+    ],
+    "expect": {
+      "language": "sv",
+      "tools": [
+        "list_files"
+      ]
+    }
+  },
+  {
+    "id": "files-create-approved",
+    "text": "Skapa filen evals/hej-{stamp}.md med texten: Hej från Leonas eval.",
+    "files": true,
+    "approve": true,
+    "requires": [
+      "tools"
+    ],
+    "expect": {
+      "language": "sv",
+      "action_status": {
+        "create_file": "completed"
+      }
+    }
+  },
+  {
+    "id": "files-create-declined",
+    "text": "Create the file evals/declined-{stamp}.txt containing the word test.",
+    "files": true,
+    "approve": false,
+    "requires": [
+      "tools"
+    ],
+    "expect": {
+      "language": "en",
+      "action_status": {
+        "create_file": "rejected"
+      },
+      "contains_any": [
+        "declin",
+        "reject",
+        "not ",
+        "n't",
+        "cancel"
+      ]
+    }
+  },
+  {
+    "id": "files-not-unasked",
+    "text": "What is a README file usually used for? Answer in two sentences.",
+    "files": true,
+    "requires": [
+      "tools"
+    ],
+    "expect": {
+      "language": "en",
+      "no_tools": [
+        "create_file"
+      ]
+    }
+  },
+  {
+    "id": "language-instruction",
+    "text": "Svara på svenska: What is the capital of Norway?",
+    "expect": {
+      "language": "sv",
+      "contains_any": [
+        "Oslo"
+      ]
+    }
+  },
+  {
+    "id": "thinking-arithmetic",
+    "text": "A train leaves at 14:35 and the trip takes 2 hours and 50 minutes. When does it arrive? Answer with the time.",
+    "think": true,
+    "requires": [
+      "thinking"
+    ],
+    "expect": {
+      "language": "en",
+      "contains_any": [
+        "17:25",
+        "17.25",
+        "5:25"
+      ]
+    }
+  },
+  {
+    "id": "long-answer",
+    "text": "Explain in detail, in about 500 words, how HTTPS protects a connection.",
+    "expect": {
+      "language": "en",
+      "contains_any": [
+        "TLS",
+        "certificate"
+      ]
+    }
+  },
+  {
+    "id": "files-search",
+    "text": "Sök i mina filer efter var jag skrev om tomatplantor och säg vilket datum som nämns där.",
+    "files": true,
+    "requires": [
+      "tools"
+    ],
+    "fixtures": {
+      "evals/fixtures-{stamp}/garden/notes.md": "Trädgård\nTomatplantorna ska skolas om den 12 maj.\nGurkor sås i juni.\n",
+      "evals/fixtures-{stamp}/work/todo.md": "Ring banken.\nUppdatera budgeten.\n"
+    },
+    "expect": {
+      "language": "sv",
+      "tools": [
+        "search_files"
+      ],
+      "contains_any": [
+        "12 maj",
+        "12:e maj"
+      ]
+    }
+  },
+  {
+    "id": "document-pdf",
+    "text": "Read evals/fixtures-{stamp}/report.pdf and tell me what the lighthouse budget was, and on which page it is mentioned.",
+    "files": true,
+    "requires": [
+      "tools"
+    ],
+    "fixtures": {
+      "evals/fixtures-{stamp}/report.pdf": {
+        "pdf": [
+          "Harbour report 2026\nVisitors increased by 8 percent.",
+          "Maintenance\nThe lighthouse budget was 4.2 million kronor.\nThe pier was repainted."
+        ]
+      }
+    },
+    "expect": {
+      "language": "en",
+      "tools": [
+        "read_document"
+      ],
+      "contains_all": [
+        "4.2",
+        "2"
+      ]
+    }
+  },
+  {
+    "id": "document-docx",
+    "text": "Läs evals/fixtures-{stamp}/brief.docx och säg när leveransen ska ske.",
+    "files": true,
+    "requires": [
+      "tools"
+    ],
+    "fixtures": {
+      "evals/fixtures-{stamp}/brief.docx": {
+        "docx": [
+          "# Projektplan",
+          "Leveransen sker den 3 oktober.",
+          "Budgeten är oförändrad."
+        ]
+      }
+    },
+    "expect": {
+      "language": "sv",
+      "tools": [
+        "read_document"
+      ],
+      "contains_any": [
+        "3 oktober"
+      ]
+    }
+  },
+  {
+    "id": "edit-file-approved",
+    "text": "In evals/fixtures-{stamp}/todo.md, change the line 'call Anna' to 'call Anna about the boat'.",
+    "files": true,
+    "approve": true,
+    "requires": [
+      "tools"
+    ],
+    "fixtures": {
+      "evals/fixtures-{stamp}/todo.md": "- buy milk\n- call Anna\n- water plants\n"
+    },
+    "expect": {
+      "language": "en",
+      "action_status": {
+        "edit_file": "completed"
+      },
+      "file_contains": {
+        "evals/fixtures-{stamp}/todo.md": "- call Anna about the boat\n- water plants"
+      }
+    }
+  },
+  {
+    "id": "command-approved",
+    "text": "Run `python3 --version` and tell me which Python version is installed.",
+    "commands": true,
+    "approve": true,
+    "requires": [
+      "tools"
+    ],
+    "expect": {
+      "language": "en",
+      "action_status": {
+        "run_command": "completed"
+      },
+      "contains_any": [
+        "Python 3",
+        "3."
+      ]
+    }
+  },
+  {
+    "id": "command-declined",
+    "text": "Kör kommandot `ls -la` i arbetsytan.",
+    "commands": true,
+    "approve": false,
+    "requires": [
+      "tools"
+    ],
+    "expect": {
+      "language": "sv",
+      "action_status": {
+        "run_command": "rejected"
+      },
+      "contains_any": [
+        "neka",
+        "avböj",
+        "inte",
+        "godkän"
+      ]
+    }
+  },
+  {
+    "id": "memory-save",
+    "text": "Kom ihåg att min favoritfärg är grön.",
+    "requires": [
+      "tools",
+      "memory"
+    ],
+    "expect": {
+      "language": "sv",
+      "tools": [
+        "save_memory"
+      ]
+    }
+  },
+  {
+    "id": "memory-recall",
+    "text": "Vilken är min favoritfärg?",
+    "requires": [
+      "tools",
+      "memory"
+    ],
+    "expect": {
+      "language": "sv",
+      "contains_any": [
+        "grön"
+      ]
+    }
+  },
+  {
+    "id": "mail-unread",
+    "text": "Har jag några olästa mejl?",
+    "accounts": true,
+    "requires": [
+      "tools",
+      "mail"
+    ],
+    "expect": {
+      "language": "sv",
+      "tools": [
+        "mail_search"
+      ],
+      "no_tools": [
+        "mail_draft",
+        "mail_send",
+        "mail_manage",
+        "calendar_create",
+        "calendar_update",
+        "calendar_delete",
+        "home_action"
+      ]
+    }
+  },
+  {
+    "id": "mail-drafts",
+    "text": "Visa mitt senaste mejlutkast.",
+    "accounts": true,
+    "requires": [
+      "tools",
+      "mail"
+    ],
+    "expect": {
+      "language": "sv",
+      "tools": [
+        "mail_search"
+      ],
+      "tool_args": {
+        "mail_search": {
+          "folder": "draft"
+        }
+      },
+      "draft_cards": true,
+      "no_tools": [
+        "mail_draft",
+        "mail_send",
+        "mail_manage",
+        "calendar_create",
+        "calendar_update",
+        "calendar_delete",
+        "home_action"
+      ]
+    }
+  },
+  {
+    "id": "calendar-week",
+    "text": "Vad har jag i kalendern den här veckan?",
+    "accounts": true,
+    "requires": [
+      "tools",
+      "calendar"
+    ],
+    "expect": {
+      "language": "sv",
+      "tools": [
+        "calendar_events"
+      ],
+      "no_tools": [
+        "mail_draft",
+        "mail_send",
+        "mail_manage",
+        "calendar_create",
+        "calendar_update",
+        "calendar_delete",
+        "home_action"
+      ]
+    }
+  },
+  {
+    "id": "calendar-create-declined",
+    "text": "Lägg in Tandläkare på torsdag klockan 14 i min kalender.",
+    "accounts": true,
+    "approve": false,
+    "requires": [
+      "tools",
+      "calendar"
+    ],
+    "expect": {
+      "language": "sv",
+      "tools": [
+        "calendar_create"
+      ],
+      "action_status": {
+        "calendar_create": "rejected"
+      },
+      "tool_args": {
+        "calendar_create": {
+          "title": "tandläkare",
+          "start": "14:00"
+        }
+      },
+      "no_tools": [
+        "calendar_update",
+        "calendar_delete"
+      ]
+    }
+  },
+  {
+    "id": "home-lights",
+    "text": "Vilka lampor är tända hemma just nu?",
+    "accounts": true,
+    "requires": [
+      "tools",
+      "home"
+    ],
+    "expect": {
+      "language": "sv",
+      "tools": [
+        "home_states"
+      ],
+      "no_tools": [
+        "home_action"
+      ]
+    }
+  },
+  {
+    "id": "home-action-declined",
+    "text": "Släck lamporna i vardagsrummet.",
+    "accounts": true,
+    "approve": false,
+    "requires": [
+      "tools",
+      "home"
+    ],
+    "expect": {
+      "language": "sv",
+      "tools": [
+        "home_action"
+      ],
+      "action_status": {
+        "home_action": "rejected"
+      },
+      "tool_args": {
+        "home_action": {
+          "service": "turn_off"
+        }
+      }
+    }
+  }
+]

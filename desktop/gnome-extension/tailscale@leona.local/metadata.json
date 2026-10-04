@@ -1,0 +1,6 @@
+{
+  "uuid": "tailscale@leona.local",
+  "name": "Tailscale status",
+  "description": "Shows whether Tailscale is connected, switches it on or off and lists the devices in the tailnet.",
+  "shell-version": ["48", "49", "50"]
+}

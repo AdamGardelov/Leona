@@ -1,0 +1,7 @@
+{
+  "uuid": "leona@leona.local",
+  "name": "Leona",
+  "description": "Shows whether the Leona backend is running and lets you open, start, stop or restart it.",
+  "shell-version": ["48", "49", "50"],
+  "url": "http://localhost:5080"
+}

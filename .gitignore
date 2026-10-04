@@ -1,0 +1,53 @@
+# .NET build outputs
+**/bin/
+**/obj/
+
+# Frontend dependencies and generated output
+**/node_modules/
+**/dist/
+**/coverage/
+*.tsbuildinfo
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# IDE and user-specific settings
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.sln.docstates
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+**/appsettings.Local.json
+**/appsettings.*.Local.json
+
+# Logs and operating-system files
+*.log
+.DS_Store
+Thumbs.db
+
+# Assistant workspace files
+/backend/workspace/
+
+# Local eval results
+tests/evals/results/
+
+# Local secrets and attachments
+/backend/keys/
+/backend/uploads/
+/backend/personal/
+
+# Speech model (downloaded separately, too large for git)
+/backend/models/
+
+# Python caches
+__pycache__/
