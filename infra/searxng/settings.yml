@@ -8,3 +8,19 @@ search:
   formats:
     - html
     - json
+  # Blocked engines come back after an hour instead of a day; one person's searches rarely trip them twice.
+  suspended_times:
+    SearxEngineAccessDenied: 3600
+    SearxEngineCaptcha: 3600
+    SearxEngineTooManyRequests: 600
+    cf_SearxEngineCaptcha: 3600
+    cf_SearxEngineAccessDenied: 3600
+    recaptcha_SearxEngineCaptcha: 3600
+# More web engines, so search keeps working while some of them block requests.
+engines:
+  - name: bing
+    disabled: false
+  - name: yahoo
+    disabled: false
+  - name: duckduckgo web
+    disabled: false

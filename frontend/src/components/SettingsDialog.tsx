@@ -267,7 +267,7 @@ export function SettingsDialog({
             )}
           </form>
           {local && <ProfilesSection open={open} current={profile} />}
-          {local && owner && <FoldersSection open={open} />}
+          {owner && <FoldersSection open={open} local={local} />}
           <DocumentsSection open={open} />
           <AccountsSection
             open={open}

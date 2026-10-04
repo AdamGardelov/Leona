@@ -61,7 +61,7 @@ For a fresh checkout, copy `.env.example` to `.env` and replace its secret with 
 docker compose up -d searxng
 ```
 
-If your account lacks Docker access, use `sudo docker compose up -d searxng`. Search listens on localhost:8080. `infra/searxng/settings.yml` enables HTML and JSON; `Tools__SearxngUrl` overrides the backend URL. There is no Bing RSS fallback. External search engines can still rate-limit or reject requests.
+If your account lacks Docker access, use `sudo docker compose up -d searxng`. Search listens on localhost:8080. `infra/searxng/settings.yml` enables HTML and JSON, adds Bing, Yahoo and DuckDuckGo's web endpoint to the default engines, and lets an engine that blocks requests back in after an hour; `Tools__SearxngUrl` overrides the backend URL. There is no Bing RSS fallback. External search engines can still rate-limit or reject requests.
 
 `read_page` returns long pages in windows of the configured page excerpt (8,000 characters by default). The model can continue with `offset` or jump to matching passages with `find`; pages are cached for the rest of the run.
 

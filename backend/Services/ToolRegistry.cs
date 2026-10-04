@@ -140,7 +140,8 @@ public partial class ToolRegistry(
         // The folder parameter only appears once the user has added folders besides the workspace.
         Param[] folder = Folders.Count > 1
             ? [new Param("folder", "string",
-                $"Optional. Which folder: {string.Join(", ", Folders.Keys.Order())}. Default: workspace.", false)]
+                $"Optional. Which folder: {string.Join(", ", Folders.Keys.Order())}. Default: the one where the path " +
+                "exists, else workspace; search_files without it searches every folder.", false)]
             : [];
         if (input.Web)
         {
@@ -334,6 +335,14 @@ public partial class ToolRegistry(
         var result = await RunAsync(call, input, ct, fingerprint);
         if (result.Status != ToolStatus.Unavailable && SourceOf(call.Function.Name) is { Length: > 0 } source)
             Expose(source);
+        // With only the workspace to look in, a file that is not found is most likely elsewhere on the computer.
+        if (Folders.Count == 1 && call.Function.Name is "list_files" or "search_files" or "read_file" or "read_document" &&
+            (result.Status == ToolStatus.Failed || result.Summary == "No matches"))
+            result = result with
+            {
+                Content = result.Content + "\nOnly Leona's own workspace folder is available. Tell the user to add the folder they mean " +
+                          "under Settings › Folders on the computer itself (not from a phone), then ask again."
+            };
         return result;
     }
 
@@ -353,8 +362,7 @@ public partial class ToolRegistry(
                 case "list_files" when input.Files:
                     return ListFiles(args);
                 case "search_files" when input.Files:
-                    return FileTools.Search(RootFor(args), args.Optional("path") ?? "", args.Required("query", 200),
-                        args.Optional("glob", 100));
+                    return SearchFiles(args);
                 case "read_file" when input.Files:
                     return await ReadFileAsync(args, ct);
                 case "read_document" when input.Files:
@@ -411,16 +419,63 @@ public partial class ToolRegistry(
 
     private string RootFor(ToolArguments args)
     {
-        var name = args.Optional("folder", 100) ?? FolderService.WorkspaceName;
+        if (args.Optional("folder", 100) is not { } name)
+            return DefaultRoot(args.Optional("path"));
         return Folders.TryGetValue(name, out var root)
             ? root
             : throw new ArgumentException($"Unknown folder \"{name}\". Available: {string.Join(", ", Folders.Keys.Order())}.");
     }
 
+    // Small models often leave out the folder: the workspace, unless the path only exists in an added folder.
+    private string DefaultRoot(string? path)
+    {
+        var workspace = Folders[FolderService.WorkspaceName];
+        if (string.IsNullOrWhiteSpace(path) || Exists(workspace, path))
+            return workspace;
+        return Folders.Values.FirstOrDefault(root => Exists(root, path)) ?? workspace;
+
+        static bool Exists(string root, string path)
+        {
+            try
+            {
+                var full = WorkspaceFiles.Resolve(root, path);
+                return File.Exists(full) || Directory.Exists(full);
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+        }
+    }
+
+    // Without a folder or path, every folder is searched, so the model finds files without knowing where they are.
+    private ToolResult SearchFiles(ToolArguments args)
+    {
+        var query = args.Required("query", 200);
+        var glob = args.Optional("glob", 100);
+        var path = args.Optional("path") ?? "";
+        if (args.Optional("folder", 100) is not null || path.Length > 0 || Folders.Count == 1)
+            return FileTools.Search(RootFor(args), path, query, glob);
+
+        var found = Folders.Where(f => Directory.Exists(f.Value))
+            .Select(f => (Folder: f.Key, Result: FileTools.Search(f.Value, "", query, glob, Math.Max(20, 60 / Folders.Count))))
+            .Where(r => r.Result.Summary != "No matches").ToList();
+        if (found.Count == 0)
+            return new ToolResult($"No files or lines matched \"{query}\" in any folder ({string.Join(", ", Folders.Keys)}).",
+                Summary: "No matches");
+        return new ToolResult(
+            string.Join("\n\n", found.Select(r => $"In folder \"{r.Folder}\" (pass folder \"{r.Folder}\" to read these):\n{r.Result.Content}")),
+            Summary: string.Join(", ", found.Select(r => $"{r.Folder}: {r.Result.Summary}")));
+    }
+
     private static SkillInput SkillOf(ToolArguments args) =>
         new(args.Required("name", 60), args.Required("when_to_use", 300), args.Required("steps", 4000));
 
-    private string FolderLabel(ToolArguments args) => args.Optional("folder", 100) ?? FolderService.WorkspaceName;
+    private string FolderLabel(ToolArguments args)
+    {
+        var root = RootFor(args);
+        return Folders.First(f => f.Value == root).Key;
+    }
 
     private ToolResult ListFiles(ToolArguments args)
     {

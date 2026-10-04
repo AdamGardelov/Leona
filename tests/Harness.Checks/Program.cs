@@ -46,6 +46,8 @@ try
     Check(result.Content.StartsWith("Tool failed:"), "symbolic links rejected");
     result = await registry.ExecuteAsync(Call("read_file", new { path = "note.txt" }), input with { Files = false }, default);
     Check(result.Content.Contains("disabled"), "disabled tools cannot execute");
+    result = await registry.ExecuteAsync(Call("read_file", new { path = "backend/Program.cs" }), input, default);
+    Check(result.Status == ToolStatus.Failed && result.Content.Contains("Settings › Folders"), "a missing file points to Settings › Folders while only the workspace is added");
     result = await registry.ExecuteAsync(Call("read_page", new { url = "http://127.0.0.1/" }), input with { Web = true }, default);
     Check(result.Content.StartsWith("Tool failed:") && result.Status == ToolStatus.Failed, "local web requests blocked at connection time");
 
@@ -142,8 +144,16 @@ try
     Check(result.Content == "extra folder" && registry.Definitions(input).Any(d => JsonSerializer.Serialize(d).Contains("\"folder\"")), "added folders are readable by name and offered to the model");
     result = await registry.ExecuteAsync(Call("read_file", new { path = "readme.md", folder = "elsewhere" }), input, default);
     Check(result.Status == ToolStatus.Failed && result.Content.Contains("Unknown folder"), "unknown folders are rejected");
+    result = await registry.ExecuteAsync(Call("read_file", new { path = "missing.md", folder = "project" }), input, default);
+    Check(result.Status == ToolStatus.Failed && !result.Content.Contains("Settings › Folders"), "the folder hint is left out once folders are added");
     result = await registry.ExecuteAsync(Call("read_file", new { path = "../readme.md", folder = "workspace" }), input, default);
     Check(result.Status == ToolStatus.Failed, "folders cannot be escaped");
+    result = await registry.ExecuteAsync(Call("search_files", new { query = "readme" }), input, default);
+    Check(result.Content.Contains("In folder \"project\"") && result.Content.Contains("readme.md"), "searching without a folder looks in every folder");
+    result = await registry.ExecuteAsync(Call("read_file", new { path = "readme.md" }), input, default);
+    Check(result.Content == "extra folder", "a path without a folder is read from the folder where it exists");
+    result = await registry.ExecuteAsync(Call("read_file", new { path = "note.txt" }), input, default);
+    Check(result.Content == "hello", "the workspace stays the default when the path exists there");
     registry.Folders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["workspace"] = root };
 
     var swedish = "<meta charset=iso-8859-1><p>Åäö svenska</p>";
@@ -880,6 +890,13 @@ try
     }, default);
     Check(handler.LastMessages.Contains("## Veckorapport för jobbet") && events.Any(e => e.Text == "Using skill: Veckorapport för jobbet") &&
           (await skillService.ListAsync(default)).Single().Uses == 1, "a matching skill reaches the model and is counted");
+    handler.Calls = 5; events.Clear();
+    await skilledChat.GenerateAsync(skillChat.Id, new ChatRequest("Bara tre punkter, tack", "test", false), e =>
+    {
+        events.Add(e);
+        return Task.CompletedTask;
+    }, default);
+    Check(events.Any(e => e.Text == "Using skill: Veckorapport för jobbet"), "a short follow-up keeps the skill of the question it answers");
 
     gate.QuietPeriod = TimeSpan.Zero;
     var scheduledChat = new Conversation { Title = "Morning brief" };

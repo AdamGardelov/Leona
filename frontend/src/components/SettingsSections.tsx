@@ -320,7 +320,8 @@ export function TrustedSitesSection({ open }: { open: boolean }) {
 }
 
 // Folders are added and removed immediately; only the user can open a folder to the tools.
-export function FoldersSection({ open }: { open: boolean }) {
+// Folders are listed everywhere, but only the computer itself can open them to the tools.
+export function FoldersSection({ open, local }: { open: boolean; local: boolean }) {
   const [workspace, setWorkspace] = useState('');
   const [folders, setFolders] = useState<Folder[]>([]);
   const [path, setPath] = useState('');
@@ -342,6 +343,8 @@ export function FoldersSection({ open }: { open: boolean }) {
       <p className="hint">
         File tools and commands work in these folders. Hidden files such as .env and .git are never
         read.
+        {!local &&
+          ' Add or remove folders on the computer itself, so a lost phone cannot open your files.'}
       </p>
       <ul className="settings-list">
         <li>
@@ -352,22 +355,26 @@ export function FoldersSection({ open }: { open: boolean }) {
           <li key={folder.id}>
             <span className="mono list-name">{folder.name}</span>
             <span className="list-path">{folder.path}</span>
-            <RemoveButton
-              label={`Remove folder ${folder.name}`}
-              onClick={() => void run(() => send(`/folders/${folder.id}`, 'DELETE'))}
-            />
+            {local && (
+              <RemoveButton
+                label={`Remove folder ${folder.name}`}
+                onClick={() => void run(() => send(`/folders/${folder.id}`, 'DELETE'))}
+              />
+            )}
           </li>
         ))}
       </ul>
-      <InlineAdd
-        id="folder-path"
-        label="Folder path"
-        placeholder="/home/you/projects/app"
-        value={path}
-        onChange={setPath}
-        onAdd={() => void add()}
-        button="Add folder"
-      />
+      {local && (
+        <InlineAdd
+          id="folder-path"
+          label="Folder path"
+          placeholder="/home/you/projects/app"
+          value={path}
+          onChange={setPath}
+          onAdd={() => void add()}
+          button="Add folder"
+        />
+      )}
       <ErrorAlert error={error} />
     </section>
   );

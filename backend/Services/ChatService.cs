@@ -160,7 +160,15 @@ public partial class ChatService(
                 tools.TrustLinksIn(text);
             if (attachments.Count > 0)
                 tools.Expose("attached files");
-            if (skills is not null && await skills.MatchAsync(input.Text, ct) is { } skill)
+            // A short follow-up such as "Pendling. Dator" keeps the skill of the question it answers.
+            var previousQuestion = history.LastOrDefault(m => m.Role == "user")?.Content;
+            var skill = skills is null
+                ? null
+                : await skills.MatchAsync(input.Text, ct) ??
+                  (previousQuestion is not null && input.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length <= 8
+                      ? await skills.MatchAsync(previousQuestion, ct)
+                      : null);
+            if (skills is not null && skill is not null)
             {
                 messages.Add(new OllamaMessage("user", SkillService.Prompt(skill)));
                 messages.Add(new OllamaMessage("assistant", "I will follow that skill where it fits."));
