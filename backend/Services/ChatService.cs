@@ -66,6 +66,8 @@ public partial class ChatService(
         var thinking = new StringBuilder();
         var accepted = false;
         var truncated = false;
+        // Pictures the tools made, such as an edited photo, are kept with the reply.
+        var made = new List<AttachmentRef>();
         Message Reply(bool complete) => new()
         {
             ConversationId = id,
@@ -74,7 +76,8 @@ public partial class ChatService(
             Thinking = thinking.ToString(),
             Complete = complete,
             Truncated = complete && truncated,
-            Model = input.Model
+            Model = input.Model,
+            AttachmentsJson = JsonSerializer.Serialize(made, RunManager.Json)
         };
 
         try
@@ -150,6 +153,8 @@ public partial class ChatService(
             tools.Limits = new ToolLimits(settings.SearchResults, settings.PageCharacters);
             tools.MemoryEnabled = settings.MemoryEnabled;
             tools.TrustedSites = await db.TrustedSites.AsNoTracking().Select(s => s.Host).ToListAsync(ct);
+            tools.ConversationId = id;
+            tools.Attached = attachments;
             if (input.Files || input.Commands)
             {
                 var folders = await FolderService.LoadAsync(db, tools.Folders[FolderService.WorkspaceName], ct);
@@ -411,11 +416,13 @@ public partial class ChatService(
                             result = ContextBudget.Excerpt(result.Content, 1500),
                             hasNews = result.HasNews,
                             drafts = MailService.DraftsIn(result.Content),
-                            mails = MailService.MessagesIn(result.Content)
+                            mails = MailService.MessagesIn(result.Content),
+                            images = result.Images
                         }
                     });
                     foreach (var source in result.Sources ?? [])
                         sources.TryAdd(source.Url, source);
+                    made.AddRange(result.Images ?? []);
                 }
 
                 if (stepAnswer.Length > 0)

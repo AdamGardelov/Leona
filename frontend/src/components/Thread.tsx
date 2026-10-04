@@ -183,6 +183,9 @@ const Reply = memo(function Reply({
       {m.tools?.map(
         (step, i) => step.mails && <MailList key={step.id ?? `list-${i}`} items={step.mails} />,
       )}
+      {m.attachments && m.attachments.length > 0 && (
+        <MessageAttachments attachments={m.attachments} />
+      )}
       {m.tools?.map((step, i) =>
         step.name === 'mail_send' ? (
           <MailStepCard key={step.id ?? `mail-${i}`} step={step} />

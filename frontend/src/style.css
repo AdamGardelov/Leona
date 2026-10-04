@@ -1574,6 +1574,18 @@ textarea:focus-visible {
   justify-content: flex-end;
   gap: 6px;
 }
+/* A picture Leona made, such as an edited photo: whole and large enough to judge. */
+article.assistant .message-attachments {
+  justify-content: flex-start;
+  margin: 10px 0;
+}
+article.assistant .message-image img {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 420px;
+  object-fit: contain;
+}
 .message-image img {
   display: block;
   width: 168px;

@@ -45,6 +45,7 @@ builder.Services.AddScoped<CalendarService>();
 builder.Services.AddScoped<HomeAssistantService>();
 builder.Services.AddScoped<AutomationService>();
 builder.Services.AddScoped<PersonalTools>();
+builder.Services.AddScoped<PhotoTools>();
 builder.Services.AddScoped<SpotifyService>();
 builder.Services.AddSingleton<SpotifyLogins>();
 builder.Services.AddSingleton<ConcertService>();
@@ -58,6 +59,8 @@ builder.Services.AddHttpClient("calendar", client => client.Timeout = TimeSpan.F
 builder.Services.AddHttpClient("home", client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient("push", client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient("spotify", client => client.Timeout = TimeSpan.FromSeconds(20));
+// The photo service on this computer; the first edit after a while loads its models, which takes a moment.
+builder.Services.AddHttpClient("photo", client => client.Timeout = TimeSpan.FromMinutes(3));
 builder.Services.AddHttpClient("jobs", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(30);

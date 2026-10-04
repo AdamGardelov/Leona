@@ -89,6 +89,8 @@ public record ToolResult(
     string? Summary = null,
     // Set by tools that report only what is new (such as find_concerts with new_only). A scheduled run
     // whose every such call found nothing new finishes without a notification.
-    bool? HasNews = null);
+    bool? HasNews = null,
+    // Pictures the tool made (such as an edited photo), shown with the reply and kept with it.
+    IReadOnlyList<AttachmentRef>? Images = null);
 
 public record ToolLimits(int SearchResults = 8, int PageCharacters = 8000);

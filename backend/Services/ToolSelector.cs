@@ -22,6 +22,7 @@ public static partial class ToolSelector
         new("jobs", ["find_jobs"], JobWords(), true),
         new("activities", ["find_activities"], ActivityWords(), true),
         new("weather", ["weather"], WeatherWords(), true),
+        new("photos", [PhotoTools.Name], PhotoWords()),
         new("documents", ["read_document"], DocumentWords()),
         new("new files", ["create_file"], CreateWords()),
         new("edits", ["edit_file"], EditWords()),
@@ -62,7 +63,7 @@ public static partial class ToolSelector
                           messageWords.Any(w => own.Any(o => TextMatch.Similar(w, o)))) ||
                          family.Tools.Any(recent.Contains) ||
                          (family.Name == "documents" && documentAttached) ||
-                         (family.Name == "expenses" && imageAttached);
+                         (family.Name is "expenses" or "photos" && imageAttached);
             if (!wanted)
                 continue;
             keep.UnionWith(family.Tools);
@@ -82,6 +83,9 @@ public static partial class ToolSelector
 
     [GeneratedRegex(@"\b(e-?mail|mail|mejl|e-?post|inbox|inkorg|brev|svar[ae]|reply|skicka|send|olä?st|unread|avsändar|sender|nyhetsbrev|newsletter|bilag|attachment|faktura|invoice|arkiv|archive|flagg|papperskorg|trash)")]
     private static partial Regex MailWords();
+
+    [GeneratedRegex(@"\b(bild|foto|photo|picture|image|ta bort|tag bort|radera|remove|erase|retusch|retouch|redigera|edit)")]
+    private static partial Regex PhotoWords();
 
     [GeneratedRegex(@"\b(kalender|calendar|möte|meeting|event|händelse|bok[an]|book|appointment|agenda|schema|idag|i dag|today|ikväll|tonight|imorgon|i morgon|tomorrow|vecka|week|helg|weekend|ledig|upptagen|busy|födelsedag|birthday|måndag|tisdag|onsdag|torsdag|fredag|lördag|söndag|monday|tuesday|wednesday|thursday|friday|saturday|sunday|morgonbrief|morning brief)")]
     private static partial Regex CalendarWords();

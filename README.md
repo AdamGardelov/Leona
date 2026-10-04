@@ -98,6 +98,21 @@ On phones Leona uses app sizes: 17 px text like iOS body text, larger icons and 
 
 Paste images with Ctrl+V, drop files on the message box, or use the paper clip (on phones: + › Camera, Photos or Files). Images are scaled to at most 1600 px and re-encoded as JPEG in the browser, so HEIC and WebP photos work too; they are sent to the model only if it reports vision support, and only with the message they belong to (later turns get a short placeholder). PDF, Word and plain-text documents are read into the message as untrusted content, up to the page excerpt size; with Files on, the full document stays readable through `read_document` in the `uploads` folder. Files are limited to 20 MB and eight per message, checked by content, and stored per profile in `backend/uploads/<profile>` (`Tools:UploadsPath`). Uploads no message refers to are removed after a day.
 
+### Editing photos
+
+Attach a photo and ask Leona to remove something: "ta bort trädet", "remove the people in the background", "the shadow too". A small photo service on this computer (`photo/server.py`) finds it from the description (Grounding DINO), outlines it (SAM) and fills in the background (LaMa). It runs on the processor, so it never competes with the chat model for graphics memory, and no picture leaves the computer. The edit is a new copy shown with the reply (tap it for full size, to save it); the original is kept, and follow-ups work on the newest edit. An edit takes 10–20 seconds; the first after ten idle minutes also loads the models, and the very first downloads them (about 1.2 GB, to `photo/models`). Small things against sky, grass or a wall come out clean; large ones in front of something detailed come out softer.
+
+Set up once (needs `python3-venv`):
+
+```sh
+python3 -m venv photo/.venv
+photo/.venv/bin/pip install -r photo/requirements.txt
+./desktop/install.sh                # adds the leona-photo service
+systemctl --user start leona-photo
+```
+
+`Photo:Url` points the backend to the service (`http://127.0.0.1:5090/` by default). Without it running, Leona says how to start it.
+
 ## Files, commands and memory
 
 Tools are opt-in per message with the Web, Files, Terminal and Personal toggles (Thinking turns on the model's reasoning). File tools work in `backend/workspace` (configurable via `Tools__WorkspacePath`) and in folders you add under Settings › Folders; each added folder gets a short name the model passes as `folder`. The model can never add folders. Every path is checked: no absolute paths, parent traversal, hidden segments (`.git`, `.env`, `.ssh`) or symbolic links.

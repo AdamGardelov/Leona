@@ -1,0 +1,7 @@
+# The processor-only build of PyTorch (no CUDA download); everything else from PyPI.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1
+torchvision==0.29.1
+transformers==5.18.0
+pillow==12.3.0
+numpy==2.5.2

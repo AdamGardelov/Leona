@@ -11,7 +11,8 @@ public partial class ToolRegistry(
     IConfiguration configuration,
     MemoryService? memories = null,
     PersonalTools? personal = null,
-    SkillService? skills = null)
+    SkillService? skills = null,
+    PhotoTools? photos = null)
 {
     // Pages and documents read during a run are cached so offset, start and find calls do not reload them.
     private readonly Dictionary<string, (string Title, string Text, string Url)> _pages = new();
@@ -24,6 +25,9 @@ public partial class ToolRegistry(
     public bool MemoryEnabled { get; set; }
     // Hosts the user always allows (see TrustedSiteService); a run can add one when it is approved.
     public List<string> TrustedSites { get; set; } = [];
+    // The chat the run belongs to and what the new message has attached, for tools that work on its photos.
+    public int? ConversationId { get; set; }
+    public IReadOnlyList<AttachmentRef> Attached { get; set; } = [];
 
     // Short folder name to absolute path. The workspace is always included.
     public IReadOnlyDictionary<string, string> Folders
@@ -77,6 +81,8 @@ public partial class ToolRegistry(
         "run_command" => "command output",
         "search_memory" => "saved memories",
         "find_concerts" => "event listings",
+        // Editing the user's own photo reads nothing from outside.
+        PhotoTools.Name => "",
         "music_taste" => "Spotify",
         _ when tool.StartsWith("mail_") => "mail",
         _ when tool.StartsWith("calendar_") => "calendars",
@@ -98,6 +104,8 @@ public partial class ToolRegistry(
     {
         if (input.Accounts && personal is not null)
             await personal.LoadAsync(ct);
+        if (photos is not null && ConversationId is { } conversationId)
+            await photos.LoadAsync(conversationId, Attached, ct);
     }
 
     internal record Param(string Name, string Type, string Description, bool Required = true);
@@ -214,6 +222,10 @@ public partial class ToolRegistry(
         if (input.Accounts && personal is not null)
             tools.AddRange(personal.Definitions());
 
+        // Only offered when the chat has a photo to work on.
+        if (photos is { Available: true })
+            tools.Add(photos.Definition());
+
         if (MemoryEnabled && memories is not null)
         {
             tools.Add(Definition("save_memory",
@@ -305,8 +317,8 @@ public partial class ToolRegistry(
         string? fingerprint = null)
     {
         var result = await RunAsync(call, input, ct, fingerprint);
-        if (result.Status != ToolStatus.Unavailable)
-            Expose(SourceOf(call.Function.Name));
+        if (result.Status != ToolStatus.Unavailable && SourceOf(call.Function.Name) is { Length: > 0 } source)
+            Expose(source);
         return result;
     }
 
@@ -349,6 +361,8 @@ public partial class ToolRegistry(
                         Summary: "Saved skill");
                 case var name when input.Accounts && personal is not null && PersonalTools.Names.Contains(name):
                     return await PersonalAsync(call, ct, fingerprint);
+                case PhotoTools.Name when photos is { Available: true }:
+                    return await photos.RemoveAsync(args, ct);
                 default:
                     return new ToolResult("Tool unavailable or disabled.", Status: ToolStatus.Unavailable);
             }

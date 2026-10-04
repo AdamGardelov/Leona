@@ -51,3 +51,7 @@ tests/evals/results/
 
 # Python caches
 __pycache__/
+
+# Photo service environment and models (set up locally, see README)
+/photo/.venv/
+/photo/models/

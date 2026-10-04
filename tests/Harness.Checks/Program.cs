@@ -341,6 +341,26 @@ try
     Check(handler.LastImageCount == 1 && handler.LastMessages.Contains("Tent") && handler.LastMessages.Contains("untrusted content"), "images reach vision models and documents are read into the message");
     var attachedMessage = (await new ConversationService(db).GetMessagesAsync(conversation.Id, default)).Last(m => m.Role == "user");
     Check(attachedMessage.Attachments.Count == 2 && attachedMessage.Attachments[0].Kind == UploadKind.Image, "attachments are saved with the message");
+    // Photos: the edit is a new upload kept with the reply; the original is untouched.
+    var photoConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Photo:Url"] = "http://photo.test/" }).Build();
+    var photoService = new FakePhotoService();
+    var photoRegistry = new ToolRegistry(new TestClients(), web, files, config,
+        photos: new PhotoTools(new FakeClients(photoService), photoConfig, uploadStore, db)) { ConversationId = conversation.Id };
+    var photoChat = new ChatRequest("Ta bort trädet", "test", false);
+    await photoRegistry.PrepareAsync(photoChat, default);
+    Check(photoRegistry.Definitions(photoChat).Select(ToolSelector.NameOf).Contains(PhotoTools.Name), "a chat with a photo offers photo editing");
+    var noPhotos = new ToolRegistry(new TestClients(), web, files, config,
+        photos: new PhotoTools(new FakeClients(photoService), photoConfig, uploadStore, db)) { ConversationId = -1 };
+    await noPhotos.PrepareAsync(photoChat, default);
+    Check(!noPhotos.Definitions(photoChat).Select(ToolSelector.NameOf).Contains(PhotoTools.Name), "a chat without photos gets no photo editing");
+    var edited = await photoRegistry.ExecuteAsync(Call(PhotoTools.Name, new { remove = "tree, shadow" }), photoChat, default);
+    var editedUpload = edited.Images is [var madeImage] ? await db.Uploads.FindAsync(madeImage.Id) : null;
+    Check(edited.Status == ToolStatus.Completed && editedUpload?.Name == "photo-edited.jpg" &&
+          File.Exists(uploadStore.PathFor(editedUpload)) && File.Exists(uploadStore.PathFor(image)) &&
+          photoService.LastRemove == "tree, shadow" && edited.Content.Contains("tree"), "an edited photo becomes a new upload and the original stays");
+    photoService.NothingFound = true;
+    var notFound = await photoRegistry.ExecuteAsync(Call(PhotoTools.Name, new { remove = "boat" }), photoChat, default);
+    Check(notFound.Status == ToolStatus.Failed && notFound.Content.Contains("Could not find boat"), "a photo edit that finds nothing says so");
     handler.Vision = false;
     await visionChat.GenerateAsync(conversation.Id, new ChatRequest("And now?", "test", false), _ => Task.CompletedTask, default);
     Check(handler.LastImageCount == 0 && handler.LastMessages.Contains("[Earlier attachment: photo.jpg]"), "earlier images are not sent again");
@@ -608,6 +628,10 @@ try
     var mailPick = Picked("Läs mitt senaste mejl från Anna och svara att det går bra");
     Check(mailPick.Contains("mail_send") && mailPick.Contains("search_web") && !mailPick.Contains("home_action") &&
           !mailPick.Contains("create_file") && mailPick.Count < everyTool.Length, "a mail question gets the mail tools, not the rest");
+    var photoDefinitions = allDefinitions.Append(new { type = "function", function = new { name = PhotoTools.Name } }).ToList();
+    Check(ToolSelector.Select(photoDefinitions, "Kan du fixa den här?", [], false, true).Tools.Select(ToolSelector.NameOf).Contains(PhotoTools.Name) &&
+          !ToolSelector.Select(photoDefinitions, "Vad blir det för väder?", [], false, false).Tools.Select(ToolSelector.NameOf).Contains(PhotoTools.Name),
+        "photo editing is picked for an attached photo, not for unrelated questions");
     var lampPick = Picked("Tänd lamporna i köket");
     Check(lampPick.Contains("home_action") && !lampPick.Contains("mail_search"), "Swedish inflections pick the right family");
     Check(Picked("Hur mår du?").IsSupersetOf(["calendar_events", "mail_search"]) && !Picked("Hur mår du?").Contains("mail_send"),
@@ -953,6 +977,25 @@ sealed class TestClients : IHttpClientFactory
 sealed class FakeClients(HttpMessageHandler handler) : IHttpClientFactory
 {
     public HttpClient CreateClient(string name) => new(handler, false);
+}
+// The photo service: "removes" by copying the photo, or finds nothing.
+sealed class FakePhotoService : HttpMessageHandler
+{
+    public string? LastRemove { get; private set; }
+    public bool NothingFound { get; set; }
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        // Like the real service, which reads Content-Length and cannot take a chunked body.
+        if (request.Content?.Headers.ContentLength is null)
+            return new(HttpStatusCode.BadRequest) { Content = new StringContent("{\"error\":\"Give input, output and what to remove.\"}") };
+        using var body = JsonDocument.Parse(await request.Content.ReadAsStringAsync(ct));
+        LastRemove = body.RootElement.GetProperty("remove").GetString();
+        if (NothingFound)
+            return new(HttpStatusCode.UnprocessableEntity) { Content = new StringContent($"{{\"error\":\"Could not find {LastRemove} in the photo.\"}}") };
+        File.Copy(body.RootElement.GetProperty("input").GetString()!, body.RootElement.GetProperty("output").GetString()!);
+        return new(HttpStatusCode.OK) { Content = new StringContent("{\"found\":[{\"label\":\"tree\",\"score\":0.8}],\"area\":0.1}") };
+    }
 }
 // Home Assistant with two rooms, an office lamp and desk, a person and many sensors without a room.
 sealed class FakeHomeAssistant : HttpMessageHandler

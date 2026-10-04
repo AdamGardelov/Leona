@@ -40,9 +40,32 @@ RestartSec=5
 WantedBy=default.target
 UNIT
 
+# The photo service, when its Python environment is set up (see README, Photos).
+if [[ -x "$repo/photo/.venv/bin/python" ]]; then
+    cat > "$units/leona-photo.service" <<UNIT
+[Unit]
+Description=Leona photo editing
+After=network-online.target
+
+[Service]
+WorkingDirectory=$repo/photo
+Environment=PHOTO_ROOT=$backend/uploads
+ExecStart=$repo/photo/.venv/bin/python $repo/photo/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+UNIT
+fi
+
 systemctl --user daemon-reload
 systemctl --user enable leona.service
 echo "Service installed: starts at login. Start it now with: systemctl --user start leona"
+if [[ -f "$units/leona-photo.service" ]]; then
+    systemctl --user enable leona-photo.service
+    echo "Photo service installed. Start it now with: systemctl --user start leona-photo"
+fi
 
 # Top bar indicators: Leona, and Tailscale (status, on/off and the tailnet's devices).
 mkdir -p "$extensions"

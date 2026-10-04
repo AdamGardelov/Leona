@@ -4,6 +4,7 @@ import {
   send,
   type AgentRun,
   type Approval,
+  type AttachmentRef,
   type Message,
   type RunEvent,
   type StepStatus,
@@ -189,6 +190,14 @@ export function useRun(options: Options) {
         const status = (event.status ?? 'completed') as StepStatus;
         const drafts = event.detail?.drafts;
         const mails = event.detail?.mails;
+        const images = event.detail?.images;
+        // Pictures a tool made, such as an edited photo, show with the reply as it is written.
+        if (Array.isArray(images) && images.length > 0) {
+          updateReply((m) => ({
+            ...m,
+            attachments: [...(m.attachments ?? []), ...(images as AttachmentRef[])],
+          }));
+        }
         updateStep(event.id, {
           status,
           summary: event.text,
