@@ -769,6 +769,74 @@ details p {
   gap: 14px;
   padding-right: 10px;
 }
+/* Projects in the sidebar: a list above the chats, and the open project's header. */
+.project-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.list-action {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--faint);
+}
+.list-action:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.project-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  text-align: left;
+}
+.project-row:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.project-row.quiet {
+  width: 100%;
+  color: var(--faint);
+}
+.project-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.project-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.danger-text {
+  margin-right: auto;
+  color: var(--error-text);
+}
+.document-status {
+  margin: 0;
+  font-size: calc(13px * var(--fs));
+  color: var(--text-2);
+}
 /* Quiet text buttons inside a card or bar. */
 .mail-list-tools .link-button,
 .listening .link-button {
@@ -3525,7 +3593,8 @@ button.profile-chip[aria-expanded='true'] {
   .tool-pill.compact {
     width: 40px;
   }
-  .conversation-row > button:first-child {
+  .conversation-row > button:first-child,
+  .project-row {
     min-height: 48px;
   }
   .archive-link,

@@ -6,7 +6,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from 'react';
-import { api, send, type Conversation, type Profile, errorText } from '../api';
+import { api, send, type Conversation, type Profile, type Project, errorText } from '../api';
 import { Icon, Mark, PanelToggle, type IconName } from '../icons';
 
 type RowProps = {
@@ -18,6 +18,9 @@ type RowProps = {
   onRename: (title: string) => void;
   onPin: () => void;
   onArchive: () => void;
+  // Projects the chat can move to; 0 takes it out of its project.
+  projects: Project[];
+  onMove: (projectId: number) => void;
   onDelete: () => void;
 };
 
@@ -31,6 +34,8 @@ function ConversationRow({
   onPin,
   onArchive,
   onDelete,
+  projects,
+  onMove,
 }: RowProps) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -181,6 +186,17 @@ function ConversationRow({
       { label: conversation.pinned ? 'Unpin' : 'Pin', icon: 'pin', action: onPin },
       { label: 'Archive', icon: 'archive', action: onArchive },
     );
+    if (conversation.projectId) {
+      items.push({ label: 'Remove from project', icon: 'folder', action: () => onMove(0) });
+    } else {
+      items.push(
+        ...projects.slice(0, 6).map((p) => ({
+          label: `Move to ${p.name}`,
+          icon: 'folder' as IconName,
+          action: () => onMove(p.id),
+        })),
+      );
+    }
   }
   items.push({
     label: 'Delete',
@@ -438,6 +454,11 @@ type SidebarProps = {
   onSelect: (id: number) => void;
   onUpdate: (conversation: Conversation, change: Partial<Conversation>) => void;
   onDelete: (conversation: Conversation) => void;
+  projects: Project[];
+  // The open project shows only its chats; null shows the chats outside projects.
+  activeProject: number | null;
+  onOpenProject: (id: number | null) => void;
+  onEditProject: (id: number | 'new') => void;
   onOpenSettings: () => void;
   onOpenAutomations: () => void;
   onCloseDrawer: () => void;
@@ -446,7 +467,10 @@ type SidebarProps = {
 export function Sidebar(props: SidebarProps) {
   const [query, setQuery] = useState('');
   const filter = query.trim().toLowerCase();
-  const source = props.showArchived ? props.archived : props.conversations;
+  const project = props.projects.find((p) => p.id === props.activeProject) ?? null;
+  const source = (props.showArchived ? props.archived : props.conversations).filter((c) =>
+    project ? c.projectId === project.id : !c.projectId,
+  );
   const visible = source.filter((c) => c.title.toLowerCase().includes(filter));
   const pinned = visible.filter((c) => c.pinned);
   const groups = byDay(visible.filter((c) => !c.pinned));
@@ -464,6 +488,8 @@ export function Sidebar(props: SidebarProps) {
         onPin={() => props.onUpdate(c, { pinned: !c.pinned })}
         onArchive={() => props.onUpdate(c, { archived: !c.archived })}
         onDelete={() => props.onDelete(c)}
+        projects={props.projects}
+        onMove={(projectId) => props.onUpdate(c, { projectId })}
       />
     );
   }
@@ -484,9 +510,33 @@ export function Sidebar(props: SidebarProps) {
           <Icon name="close" size={20} />
         </button>
       </div>
+      {project && (
+        <div className="project-head">
+          <button
+            className="icon-button"
+            aria-label="Back to all chats"
+            title="All chats"
+            onClick={() => props.onOpenProject(null)}
+          >
+            <Icon name="back" size={16} />
+          </button>
+          <span className="project-name">
+            <Icon name="folder" size={16} />
+            {project.name}
+          </span>
+          <button
+            className="icon-button"
+            aria-label={`Settings for ${project.name}`}
+            title="Project settings"
+            onClick={() => props.onEditProject(project.id)}
+          >
+            <Icon name="settings" size={16} />
+          </button>
+        </div>
+      )}
       <button className="new" disabled={props.busy || props.deleting} onClick={props.onNew}>
         <Icon name="plus" />
-        New conversation
+        {project ? 'New chat in project' : 'New conversation'}
       </button>
       <label className="search">
         <Icon name="search" size={15} />
@@ -513,6 +563,40 @@ export function Sidebar(props: SidebarProps) {
           </>
         ) : (
           <>
+            {!project && !filter && (
+              <>
+                <div className="label list-heading project-heading">
+                  Projects
+                  <button
+                    className="list-action"
+                    aria-label="New project"
+                    title="New project"
+                    onClick={() => props.onEditProject('new')}
+                  >
+                    <Icon name="plus" size={14} />
+                  </button>
+                </div>
+                {props.projects.map((p) => (
+                  <div className="conversation-row" key={`project-${p.id}`}>
+                    <button className="project-row" onClick={() => props.onOpenProject(p.id)}>
+                      <Icon name="folder" size={15} />
+                      <span className="conversation-title">{p.name}</span>
+                      {props.conversations.some((c) => c.projectId === p.id && c.unread) && (
+                        <span className="unread-dot">
+                          <span className="visually-hidden">, unread</span>
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                ))}
+                {props.projects.length === 0 && (
+                  <button className="project-row quiet" onClick={() => props.onEditProject('new')}>
+                    <Icon name="plus" size={15} />
+                    <span className="conversation-title">New project</span>
+                  </button>
+                )}
+              </>
+            )}
             {pinned.length > 0 && (
               <>
                 <div className="label list-heading">Pinned</div>
@@ -526,6 +610,9 @@ export function Sidebar(props: SidebarProps) {
               </Fragment>
             ))}
             {filter && !visible.length && <p className="no-results">No matching conversations</p>}
+            {project && !filter && !visible.length && (
+              <p className="no-results">No chats in the project yet</p>
+            )}
           </>
         )}
       </nav>

@@ -3,6 +3,7 @@ import { api, send, type Profile, type Settings, errorText } from '../api';
 import { Dialog } from './Dialog';
 import { Field } from './Field';
 import {
+  DocumentsSection,
   FoldersSection,
   JobRadarSection,
   MemorySection,
@@ -267,6 +268,7 @@ export function SettingsDialog({
           </form>
           {local && <ProfilesSection open={open} current={profile} />}
           {local && owner && <FoldersSection open={open} />}
+          <DocumentsSection open={open} />
           <AccountsSection
             open={open}
             canSendSecrets={local || window.location.protocol === 'https:'}

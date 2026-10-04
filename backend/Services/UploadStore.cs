@@ -116,7 +116,8 @@ public sealed class UploadStore(IHostEnvironment environment, IConfiguration con
     public async Task CleanupAsync(ChatDb db, CancellationToken ct)
     {
         var cutoff = DateTime.UtcNow.AddDays(-1);
-        var old = await db.Uploads.Where(u => u.CreatedAt < cutoff).ToListAsync(ct);
+        // A project's files stay as long as the project does.
+        var old = await db.Uploads.Where(u => u.CreatedAt < cutoff && u.ProjectId == null).ToListAsync(ct);
         // The uploads messages refer to, read once rather than searched for per upload.
         var referenced = old.Count == 0
             ? []

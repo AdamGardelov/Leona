@@ -28,20 +28,26 @@ public static class FolderEndpoints
         RemoteAccess.IsLocal(context) && profile.Owner;
 
     private static async Task<IResult> AddAsync(AddFolder request, FolderService folders, HttpContext context,
-        CurrentProfile profile, CancellationToken ct)
+        CurrentProfile profile, DocumentIndexer indexer, CancellationToken ct)
     {
         if (!CanManage(context, profile))
             return Results.StatusCode(StatusCodes.Status403Forbidden);
 
-        return Results.Ok(await folders.AddAsync(request.Path, ct));
+        var folder = await folders.AddAsync(request.Path, ct);
+        // Its documents become searchable.
+        indexer.Trigger();
+        return Results.Ok(folder);
     }
 
     private static async Task<IResult> DeleteAsync(int id, FolderService folders, HttpContext context,
-        CurrentProfile profile, CancellationToken ct)
+        CurrentProfile profile, DocumentIndexer indexer, CancellationToken ct)
     {
         if (!CanManage(context, profile))
             return Results.StatusCode(StatusCodes.Status403Forbidden);
 
-        return await folders.DeleteAsync(id, ct) ? Results.NoContent() : Results.NotFound();
+        if (!await folders.DeleteAsync(id, ct))
+            return Results.NotFound();
+        indexer.Trigger();
+        return Results.NoContent();
     }
 }

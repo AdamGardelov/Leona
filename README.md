@@ -3,7 +3,8 @@
 A private AI assistant that runs on your own computer. Leona talks to local models through [Ollama](https://ollama.com), so conversations, mail and files never leave the house, and you reach it from your phone over [Tailscale](https://tailscale.com).
 
 - **Chat** with streamed answers, tool steps you can follow, editing and regenerating, a run inspector and dark/light themes.
-- **Web**: search through your own SearXNG and read pages, with sources.
+- **Web**: search through your own SearXNG and read pages, with sources; **Research** reads many pages and writes a report.
+- **Projects and documents**: projects with their own instructions and files, and search by meaning in your own PDF, Word and text files.
 - **Files and terminal**: read, create and edit files and run commands in folders you choose, each change approved by you.
 - **Personal**: mail (IMAP/SMTP), calendars (CalDAV/iCloud), Home Assistant, Spotify, expenses.
 - **Göteborg radars**: open jobs (Platsbanken and employers' career pages), things to do with small children, concerts and the SMHI forecast.
@@ -21,6 +22,7 @@ Requires the .NET 10 SDK, Node.js 22.12+ and Ollama with a model that supports t
 git clone git@github.com:AdamGardelov/Leona.git
 cd Leona
 ollama pull gemma4:e4b
+ollama pull qwen3-embedding:0.6b   # document search; optional
 dotnet run --project backend
 ```
 
@@ -63,6 +65,14 @@ If your account lacks Docker access, use `sudo docker compose up -d searxng`. Se
 
 `read_page` returns long pages in windows of the configured page excerpt (8,000 characters by default). The model can continue with `offset` or jump to matching passages with `find`; pages are cached for the rest of the run.
 
+## Projects, documents and research
+
+**Projects** gather chats that belong together, such as the housing association or a job search. Create one with + under Projects in the sidebar and give it instructions (who it is about, how answers should be) and files. Every chat in the project follows the instructions, and each message there brings the passages of the project's files that match it, so the model answers from them and names the file. A chat moves into or out of a project from its menu. Deleting a project keeps its chats and removes its files.
+
+**Your own documents.** Leona searches PDF, Word and text files by meaning, not only by words: those in folders added under Settings › Folders, documents attached to chats, and project files. A small embedding model (`qwen3-embedding:0.6b`, about 1 GB next to the chat model, set with `Search:EmbeddingModel`) turns each passage of about 1000 characters into a vector, stored in SQLite; nothing leaves the computer. New and changed files are read within ten minutes, when no chat is running, or at once with Settings › Documents › Check for new documents. Questions about contracts, receipts, manuals and the like get the `search_documents` tool, which returns the best passages with the file and page; hidden folders, `node_modules`, build output and files over 20 MB are skipped. Scanned PDFs need OCR, which is not included.
+
+**Research** (the toggle next to Web) answers one question thoroughly instead of quickly: the model plans four searches, reads the ten best pages from them (at most two per site), notes what each says about the question, searches once more for what is missing, and then writes a report with headings and numbered sources. It takes a few minutes with a small model and sends a notification when the report is ready, so the phone can be put away meanwhile. It needs SearXNG (above).
+
 ## Phone access
 
 Leona can be used from a phone on the same Wi-Fi. Build the frontend once (`cd frontend && npm run build`; the backend serves `frontend/dist`), then start the backend with phone access on:
@@ -96,7 +106,7 @@ On phones Leona uses app sizes: 17 px text like iOS body text, larger icons and 
 
 ## Attachments
 
-Paste images with Ctrl+V, drop files on the message box, or use the paper clip (on phones: + › Camera, Photos or Files). A photo in the chat opens full screen over it; close it with ×, a tap beside it, a swipe down or the back gesture, and save it with the share button (Spara bild on iPhone). Images are scaled to at most 1600 px and re-encoded as JPEG in the browser, so HEIC and WebP photos work too; they are sent to the model only if it reports vision support, and only with the message they belong to (later turns get a short placeholder). PDF, Word and plain-text documents are read into the message as untrusted content, up to the page excerpt size; with Files on, the full document stays readable through `read_document` in the `uploads` folder. Files are limited to 20 MB and eight per message, checked by content, and stored per profile in `backend/uploads/<profile>` (`Tools:UploadsPath`). Uploads no message refers to are removed after a day.
+Paste images with Ctrl+V, drop files on the message box, or use the paper clip (on phones: + › Camera, Photos or Files). A photo in the chat opens full screen over it; close it with ×, a tap beside it, a swipe down or the back gesture, and save it with the share button (Spara bild on iPhone). Images are scaled to at most 1600 px and re-encoded as JPEG in the browser, so HEIC and WebP photos work too; they are sent to the model only if it reports vision support, and only with the message they belong to (later turns get a short placeholder). PDF, Word and plain-text documents are read into the message as untrusted content, up to the page excerpt size; with Files on, the full document stays readable through `read_document` in the `uploads` folder. Files are limited to 20 MB and eight per message, checked by content, and stored per profile in `backend/uploads/<profile>` (`Tools:UploadsPath`). Uploads no message refers to are removed after a day; project files stay with their project.
 
 ### Editing photos
 
@@ -125,6 +135,7 @@ Tools are opt-in per message with the Web, Files, Terminal and Personal toggles 
 | `create_file` | A new file only; never overwrites | Yes, with a content preview |
 | `edit_file` | Replaces one exact, unique piece of text | Yes, with a diff; refused if the file changed after the proposal |
 | `run_command` | One bash command in a chosen folder, with a timeout (default 120 s) and bounded output | Yes, every time; `sudo`, `su`, `doas` and `pkexec` are refused |
+| `search_documents` | Passages from your own documents and project files that match a question (see Projects, documents and research) | No |
 | `save_memory`, `search_memory` | Short notes kept between conversations | No, unless the chat has read untrusted content (below); view and delete them in Settings |
 | `save_skill` | A reusable procedure for a kind of task | Yes, always |
 

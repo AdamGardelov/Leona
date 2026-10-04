@@ -16,4 +16,6 @@ public class Upload : IProfileOwned
     public string Mime { get; set; } = "";
     public long Size { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    // Set for a project's files, which are kept as long as the project is.
+    public int? ProjectId { get; set; }
 }

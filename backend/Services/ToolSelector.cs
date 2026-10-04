@@ -23,6 +23,7 @@ public static partial class ToolSelector
         new("activities", ["find_activities"], ActivityWords(), true),
         new("weather", ["weather"], WeatherWords(), true),
         new("photos", [PhotoTools.Name], PhotoWords()),
+        new("own documents", ["search_documents"], OwnDocumentWords()),
         new("documents", ["read_document"], DocumentWords()),
         new("new files", ["create_file"], CreateWords()),
         new("edits", ["edit_file"], EditWords()),
@@ -46,7 +47,8 @@ public static partial class ToolSelector
     // learned adds words from the user's own setup per family, such as room names for "home".
     public static (IReadOnlyList<object> Tools, IReadOnlyList<string> Matched) Select(
         IReadOnlyList<object> definitions, string text, IEnumerable<string> recentTools, bool documentAttached,
-        bool imageAttached, IReadOnlyDictionary<string, IReadOnlyCollection<string>>? learned = null)
+        bool imageAttached, IReadOnlyDictionary<string, IReadOnlyCollection<string>>? learned = null,
+        bool projectFiles = false)
     {
         var recent = recentTools.ToHashSet();
         var lower = text.ToLowerInvariant();
@@ -63,7 +65,9 @@ public static partial class ToolSelector
                           messageWords.Any(w => own.Any(o => TextMatch.Similar(w, o)))) ||
                          family.Tools.Any(recent.Contains) ||
                          (family.Name == "documents" && documentAttached) ||
-                         (family.Name is "expenses" or "photos" && imageAttached);
+                         (family.Name is "expenses" or "photos" && imageAttached) ||
+                         // A project's chats can always search its files.
+                         (family.Name == "own documents" && projectFiles);
             if (!wanted)
                 continue;
             keep.UnionWith(family.Tools);
@@ -83,6 +87,9 @@ public static partial class ToolSelector
 
     [GeneratedRegex(@"\b(e-?mail|mail|mejl|e-?post|inbox|inkorg|brev|svar[ae]|reply|skicka|send|olä?st|unread|avsändar|sender|nyhetsbrev|newsletter|bilag|attachment|faktura|invoice|arkiv|archive|flagg|papperskorg|trash)")]
     private static partial Regex MailWords();
+
+    [GeneratedRegex(@"\b(dokument|document|fil(en|er)?\b|files?\b|pdf|avtal|kontrakt|contract|kvitto|receipt|faktura|invoice|anteckning|notes?\b|protokoll|rapport|report|manual|handbok|instruktion|papper|intyg|försäkring|insurance|garanti|warranty|deklaration|lönespec|offert|quote|cv\b|står det|enligt|i mina|in my)")]
+    private static partial Regex OwnDocumentWords();
 
     [GeneratedRegex(@"\b(bild|foto|photo|picture|image|ta bort|tag bort|radera|remove|erase|retusch|retouch|redigera|edit)")]
     private static partial Regex PhotoWords();

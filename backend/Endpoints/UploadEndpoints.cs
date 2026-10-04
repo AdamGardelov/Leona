@@ -13,10 +13,14 @@ public static class UploadEndpoints
         group.MapGet("/{id:guid}", DownloadAsync);
     }
 
-    private static async Task<IResult> UploadAsync(IFormFile file, UploadStore store, ChatDb db, CancellationToken ct)
+    private static async Task<IResult> UploadAsync(IFormFile file, UploadStore store, ChatDb db, DocumentIndexer indexer,
+        CancellationToken ct)
     {
         await using var stream = file.OpenReadStream();
         var upload = await store.SaveAsync(db, file.FileName, stream, file.Length, ct);
+        // Uploaded documents become searchable too.
+        if (upload.Kind == Harness.Models.UploadKind.Document)
+            indexer.Trigger();
         return Results.Ok(UploadStore.Reference(upload));
     }
 

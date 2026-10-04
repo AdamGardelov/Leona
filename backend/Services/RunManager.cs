@@ -262,6 +262,10 @@ public sealed class RunManager(IServiceScopeFactory scopes, ILogger<RunManager> 
             // Scheduled runs keep their task's name.
             if (status == RunStatus.Completed && !request.Background)
                 await NameConversationAsync(id, run.ConversationId, request.Model, chat, ct);
+            // Research takes minutes, so its report is announced like a scheduled task's.
+            if (status == RunStatus.Completed && request.Research)
+                await scope.ServiceProvider.GetRequiredService<NotificationService>().NotifyAsync(profile.Id, "Research ready",
+                    ContextBudget.Excerpt(request.Text, 140, "…"), $"/?conversation={run.ConversationId}", ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

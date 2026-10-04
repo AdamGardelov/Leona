@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react';
-import { api, send, type Folder, type MemoryItem, type TrustedSite } from '../api';
+import {
+  api,
+  send,
+  type DocumentStatus,
+  type Folder,
+  type MemoryItem,
+  type TrustedSite,
+} from '../api';
 import { Icon } from '../icons';
 import { useSection } from '../useSection';
 import { CopyButton } from './CodeBlock';
@@ -413,6 +420,57 @@ export function MemorySection({ open }: { open: boolean }) {
             : 'Nothing saved yet. Ask Leona to remember something.'}
         </p>
       )}
+      <ErrorAlert error={error} />
+    </section>
+  );
+}
+
+// What document search covers and how far indexing has come. Everything is read and searched on this
+// computer, with a small model next to the chat model.
+export function DocumentsSection({ open }: { open: boolean }) {
+  const [status, setStatus] = useState<DocumentStatus | null>(null);
+  const { error, run } = useSection(open, async () => {
+    setStatus(await api<DocumentStatus>('/documents'));
+  });
+
+  return (
+    <section className="settings-section" aria-labelledby="documents-heading">
+      <h3 id="documents-heading">Documents</h3>
+      <p className="hint">
+        Leona searches your documents by meaning: PDF, Word and text files in your folders (above),
+        documents you have attached and project files. New and changed files are read within ten
+        minutes.
+      </p>
+      {status && !status.installed && (
+        <p className="hint">
+          Install the search model once with <code>ollama pull {status.model}</code>.
+        </p>
+      )}
+      {status?.installed && (
+        <p className="document-status">
+          {status.working
+            ? 'Reading documents…'
+            : `${status.documents} ${status.documents === 1 ? 'document' : 'documents'}, ${status.passages} ${status.passages === 1 ? 'passage' : 'passages'} searchable`}
+        </p>
+      )}
+      {status && status.failed.length > 0 && (
+        <ul className="settings-list">
+          {status.failed.map((f) => (
+            <li key={f.name}>
+              <span className="list-name">{f.name}</span>
+              <span className="list-path">{f.error}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button
+        type="button"
+        className="secondary"
+        disabled={!status?.installed}
+        onClick={() => void run(() => send('/documents/reindex', 'POST'))}
+      >
+        Check for new documents
+      </button>
       <ErrorAlert error={error} />
     </section>
   );

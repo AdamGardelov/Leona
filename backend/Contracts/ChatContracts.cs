@@ -16,7 +16,9 @@ public record ChatRequest(
     bool Background = false,
     // Set for scheduled tasks, also with "Run now": more tool steps, since nobody waits for the answer, and
     // no e-mail drafts saved without asking.
-    bool Scheduled = false);
+    bool Scheduled = false,
+    // Djupsökning: search widely and read many pages before writing a report with sources.
+    bool Research = false);
 
 // An uploaded file attached to a message. Only the ID is trusted from clients; the rest comes from the store.
 public record AttachmentRef(Guid Id, string Name, string Kind, string Mime, long Size);

@@ -11,8 +11,8 @@ public static class ConversationEndpoints
         var group = app.MapGroup("/api/conversations");
         group.MapGet("", ListAsync);
         group.MapDelete("/{id:int}", DeleteAsync);
-        group.MapPost("", CreateAsync);
-        group.MapPatch("/{id:int}", UpdateAsync);
+        group.MapPost("", CreateAsync).WithInputErrors();
+        group.MapPatch("/{id:int}", UpdateAsync).WithInputErrors();
         group.MapPost("/{id:int}/read", async (int id, ConversationService conversations, CancellationToken ct) =>
             await conversations.MarkReadAsync(id, ct) ? Results.NoContent() : Results.NotFound());
         group.MapGet("/{id:int}/messages", GetMessagesAsync);
@@ -34,8 +34,10 @@ public static class ConversationEndpoints
         bool archived = false) =>
         Results.Ok(await conversations.ListAsync(archived, ct));
 
-    private static async Task<IResult> CreateAsync(ConversationService conversations, CancellationToken ct) =>
-        Results.Ok(await conversations.CreateAsync(ct));
+    // The body is optional; a project id starts the chat inside that project.
+    private static async Task<IResult> CreateAsync(ConversationService conversations, CancellationToken ct,
+        ConversationCreate? input = null) =>
+        Results.Ok(await conversations.CreateAsync(ct, input?.ProjectId));
 
     private static async Task<IResult> UpdateAsync(int id, ConversationUpdate update,
         ConversationService conversations, CancellationToken ct)

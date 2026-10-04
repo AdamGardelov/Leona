@@ -13,6 +13,7 @@ public class Conversation : IProfileOwned
     // Last time Leona saved a reply, and last time the user had the chat open; a newer reply is unread.
     public DateTime? RepliedAt { get; set; }
     public DateTime? ReadAt { get; set; }
+    public int? ProjectId { get; set; }
 
     [System.ComponentModel.DataAnnotations.Schema.NotMapped]
     public bool Unread => RepliedAt is { } replied && (ReadAt is not { } read || replied > read);

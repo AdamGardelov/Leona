@@ -20,7 +20,10 @@ public record MessageView(
     IReadOnlyList<AttachmentRef> Attachments,
     string Model);
 
-public record ConversationUpdate(bool? Pinned, bool? Archived, string? Title);
+// ProjectId moves the chat into a project; 0 takes it out again.
+public record ConversationUpdate(bool? Pinned, bool? Archived, string? Title, int? ProjectId = null);
+
+public record ConversationCreate(int? ProjectId);
 
 public class ConversationService(ChatDb db)
 {
@@ -30,9 +33,11 @@ public class ConversationService(ChatDb db)
             .OrderByDescending(c => c.Pinned).ThenByDescending(c => c.UpdatedAt).ThenByDescending(c => c.Id)
             .ToListAsync(ct);
 
-    public async Task<Conversation> CreateAsync(CancellationToken ct)
+    public async Task<Conversation> CreateAsync(CancellationToken ct, int? projectId = null)
     {
-        var conversation = new Conversation { Title = "New conversation" };
+        if (projectId is { } project && !await db.Projects.AnyAsync(p => p.Id == project, ct))
+            throw new KeyNotFoundException();
+        var conversation = new Conversation { Title = "New conversation", ProjectId = projectId };
         db.Conversations.Add(conversation);
         await db.SaveChangesAsync(ct);
         return conversation;
@@ -53,6 +58,13 @@ public class ConversationService(ChatDb db)
             if (archived)
                 conversation.Pinned = false;
         }
+
+        if (update.ProjectId is 0)
+            conversation.ProjectId = null;
+        else if (update.ProjectId is { } project)
+            conversation.ProjectId = await db.Projects.AnyAsync(p => p.Id == project, ct)
+                ? project
+                : throw new KeyNotFoundException();
 
         if (!string.IsNullOrWhiteSpace(update.Title))
             conversation.Title = update.Title.Trim()[..Math.Min(update.Title.Trim().Length, 60)];

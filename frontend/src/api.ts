@@ -7,6 +7,24 @@ export type Conversation = {
   updatedAt?: string;
   // Leona replied after the user last had the chat open.
   unread?: boolean;
+  projectId?: number | null;
+};
+// A group of chats with shared instructions and files.
+export type Project = {
+  id: number;
+  name: string;
+  instructions: string;
+  chats: number;
+  files: AttachmentRef[];
+};
+export type DocumentStatus = {
+  model: string;
+  installed: boolean;
+  working: boolean;
+  documents: number;
+  passages: number;
+  updated?: string | null;
+  failed: { name: string; error: string }[];
 };
 export type Source = { title: string; url: string };
 export type StepStatus =

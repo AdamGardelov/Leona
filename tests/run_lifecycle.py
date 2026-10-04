@@ -160,6 +160,18 @@ with tempfile.TemporaryDirectory(prefix='leona-lifecycle-') as temp:
         def task_view(t): return next(x for x in request('/tasks')[1] if x['id']==t['id'])
         check(request('/tasks/'+str(needs['id'])+'/run','POST')[0]==202 and eventually(lambda: task_view(needs)['runStatus']=='awaiting_approval') and task_view(task)['runStatus'] is None,'the task list shows which tasks have a run going')
         waiting_run=request('/conversations/'+str(task_view(needs)['conversationId'])+'/runs')[1][0]
+        # Projects: chats start in one, keep files, can leave it; deleting a project keeps its chats.
+        status,proj=request('/projects','POST',{'name':'Walle','instructions':'Walle är ett år.'})
+        check(status==200 and proj['name']=='Walle' and request('/projects','POST',{'name':''})[0]==400,'projects are created and need a name')
+        status,in_project=request('/conversations','POST',{'projectId':proj['id']})
+        check(status==200 and in_project['projectId']==proj['id'] and request('/conversations','POST',{'projectId':99999})[0]==404,'a chat can start in a project')
+        status,lease=upload('lease.txt',b'Hyran ar 9450 kr.\n')
+        check(request('/projects/'+str(proj['id'])+'/files','POST',{'uploadId':lease['id']})[0]==200 and [f['name'] for f in request('/projects')[1][0]['files']]==['lease.txt'],'a project keeps files')
+        check(request('/conversations/'+str(in_project['id']),'PATCH',{'projectId':0})[1]['projectId'] is None,'a chat can leave its project')
+        request('/conversations/'+str(in_project['id']),'PATCH',{'projectId':proj['id']})
+        check(request('/projects/'+str(proj['id']),'DELETE')[0]==204 and request('/projects')[1]==[] and
+              any(c['id']==in_project['id'] and c['projectId'] is None for c in request('/conversations')[1]),'deleting a project keeps its chats')
+        check(set(request('/documents')[1])>={'installed','documents','passages','failed'},'the document index reports its state')
         request('/runs/'+waiting_run['id']+'/cancel','POST'); wait(waiting_run,'cancelled')
         check(request('/watches','POST',{'url':'ftp://example.com','find':'Price'})[0]==400 and request('/watches','POST',{'url':'https://example.com','find':'Price','below':100,'intervalMinutes':60})[0]==200,'watches are validated and saved')
         check(len(request('/push/key')[1]['publicKey'])==87,'a push key is available for subscriptions')

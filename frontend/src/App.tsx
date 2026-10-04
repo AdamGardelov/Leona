@@ -11,6 +11,7 @@ import {
   type Conversation,
   type MailItem,
   type Message,
+  type Project,
   type Session,
   type Settings,
   type Source,
@@ -30,6 +31,7 @@ import { InspectorDialog } from './components/InspectorDialog';
 import { SettingsDialog } from './components/SettingsDialog';
 import { AutomationsDialog } from './components/AutomationsDialog';
 import { NotificationsDialog } from './components/NotificationsDialog';
+import { ProjectDialog } from './components/ProjectDialog';
 import { Sidebar } from './components/Sidebar';
 import { Thread } from './components/Thread';
 
@@ -65,7 +67,14 @@ type Queued = {
 };
 
 // The tool switches a message is sent with; the keys are those of the run input.
-type Tools = { web: boolean; files: boolean; commands: boolean; accounts: boolean; think: boolean };
+type Tools = {
+  web: boolean;
+  files: boolean;
+  commands: boolean;
+  accounts: boolean;
+  think: boolean;
+  research: boolean;
+};
 
 function toolsOf(source: Partial<Tools>): Tools {
   return {
@@ -74,6 +83,7 @@ function toolsOf(source: Partial<Tools>): Tools {
     commands: !!source.commands,
     accounts: !!source.accounts,
     think: !!source.think,
+    research: !!source.research,
   };
 }
 
@@ -84,7 +94,8 @@ const toolSwitches: {
   label: string;
   icon: IconName;
   hint: string;
-  needs: 'tools' | 'thinking';
+  // What the model must support; research works with any model.
+  needs: 'tools' | 'thinking' | 'nothing';
   ownerOnly?: boolean;
 }[] = [
   {
@@ -123,6 +134,13 @@ const toolSwitches: {
     icon: 'bulb',
     needs: 'thinking',
     hint: 'Let the model reason before answering',
+  },
+  {
+    key: 'research',
+    label: 'Research',
+    icon: 'fileSearch',
+    needs: 'nothing',
+    hint: 'Searches widely and reads many pages, then writes a report with sources. Takes a few minutes; you get a notification',
   },
 ];
 type HistoryMessage = Omit<Message, 'tools'> & {
@@ -185,6 +203,10 @@ export function App({ session }: { session: Session }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [archived, setArchived] = useState<Conversation[]>([]);
   const [showArchived, setShowArchived] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  // The project open in the sidebar, where new chats start; and the project being edited.
+  const [activeProject, setActiveProject] = useState<number | null>(null);
+  const [editingProject, setEditingProject] = useState<number | 'new' | null>(null);
   const [id, setId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [models, setModels] = useState<string[]>([]);
@@ -234,16 +256,19 @@ export function App({ session }: { session: Session }) {
 
   useEffect(() => writeStorage('leona-composer', { model, ...tools }), [model, tools]);
   // A switch only counts when the model supports it and the profile may use it.
-  const allowed = (t: (typeof toolSwitches)[number]) =>
-    (t.needs === 'thinking' ? supportsThinking : supportsTools) && (owner || !t.ownerOnly);
+  const supports = (t: (typeof toolSwitches)[number]) =>
+    t.needs === 'nothing' || (t.needs === 'thinking' ? supportsThinking : supportsTools);
+  const allowed = (t: (typeof toolSwitches)[number]) => supports(t) && (owner || !t.ownerOnly);
 
   async function refresh() {
-    const [active, stored] = await Promise.all([
+    const [active, stored, projectList] = await Promise.all([
       api<Conversation[]>('/conversations'),
       api<Conversation[]>('/conversations?archived=true'),
+      api<Project[]>('/projects'),
     ]);
     setConversations(active);
     setArchived(stored);
+    setProjects(projectList);
   }
 
   // A chat counts as read once it has been open on screen; the dot then goes away on every device.
@@ -534,6 +559,11 @@ export function App({ session }: { session: Session }) {
         return;
       }
       setId(next);
+      // The sidebar follows a chat into its project, or out of it.
+      const opened = [...conversations, ...archived].find((c) => c.id === next);
+      if (opened) {
+        setActiveProject(opened.projectId ?? null);
+      }
       setMessages(fromHistory(history));
       run.reset();
       run.setLastRunId(runs[0]?.id ?? null);
@@ -710,7 +740,11 @@ export function App({ session }: { session: Session }) {
     let active = id;
     try {
       if (active === null) {
-        const conversation = await send<Conversation>('/conversations', 'POST');
+        const conversation = await send<Conversation>(
+          '/conversations',
+          'POST',
+          activeProject ? { projectId: activeProject } : undefined,
+        );
         active = conversation.id;
         setId(active);
       }
@@ -728,6 +762,10 @@ export function App({ session }: { session: Session }) {
         setText('');
         attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
         setAttachments([]);
+      }
+      // Research is for one question at a time; the next message is an ordinary one again.
+      if (tools.research) {
+        setTools((previous) => ({ ...previous, research: false }));
       }
       await run.watch(created);
       await refresh();
@@ -753,7 +791,7 @@ export function App({ session }: { session: Session }) {
 
   const title = id
     ? ([...conversations, ...archived].find((c) => c.id === id)?.title ?? 'Conversation')
-    : 'New conversation';
+    : (projects.find((p) => p.id === activeProject)?.name ?? 'New conversation');
   const toggles: Toggle[] = toolSwitches
     .filter((t) => owner || !t.ownerOnly)
     .map((t) => ({
@@ -762,7 +800,7 @@ export function App({ session }: { session: Session }) {
       hint: t.hint,
       on: tools[t.key],
       set: (on: boolean) => setTools((previous) => ({ ...previous, [t.key]: on })),
-      supported: t.needs === 'thinking' ? supportsThinking : supportsTools,
+      supported: supports(t),
     }));
   const currentStatus = run.timeline[run.timeline.length - 1]?.text;
   const ready = attachments.filter((a) => a.status === 'ready' && a.ref).map((a) => a.ref!);
@@ -801,6 +839,17 @@ export function App({ session }: { session: Session }) {
         onCloseDrawer={() => setDrawer(false)}
         onUpdate={(c, change) => void updateConversation(c, change)}
         onDelete={(c) => void deleteConversation(c)}
+        projects={projects}
+        activeProject={activeProject}
+        onOpenProject={(projectId) => {
+          setActiveProject(projectId);
+          setShowArchived(false);
+          // A running answer keeps its chat on screen; otherwise the project starts on a new chat.
+          if (!run.busy) {
+            newConversation();
+          }
+        }}
+        onEditProject={setEditingProject}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenAutomations={() => {
           setDrawer(false);
@@ -1007,6 +1056,30 @@ export function App({ session }: { session: Session }) {
         profile={session.profile}
         onClose={() => setSettingsOpen(false)}
         onSaved={() => void loadModels().catch(() => {})}
+      />
+      <ProjectDialog
+        project={
+          editingProject === 'new' ? null : (projects.find((p) => p.id === editingProject) ?? null)
+        }
+        open={editingProject !== null}
+        onClose={() => setEditingProject(null)}
+        onSaved={(projectId, close) => {
+          // A new project opens in the sidebar.
+          if (editingProject === 'new') {
+            setActiveProject(projectId);
+            if (!run.busy) {
+              newConversation();
+            }
+          }
+          void refresh()
+            .then(() => setEditingProject(close ? null : projectId))
+            .catch((e) => setError(errorText(e)));
+        }}
+        onDeleted={() => {
+          setEditingProject(null);
+          setActiveProject(null);
+          void refresh().catch((e) => setError(errorText(e)));
+        }}
       />
       <SkillDialog
         open={skillOpen}

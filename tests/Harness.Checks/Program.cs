@@ -361,6 +361,87 @@ try
     photoService.NothingFound = true;
     var notFound = await photoRegistry.ExecuteAsync(Call(PhotoTools.Name, new { remove = "boat" }), photoChat, default);
     Check(notFound.Status == ToolStatus.Failed && notFound.Content.Contains("Could not find boat"), "a photo edit that finds nothing says so");
+
+    // Projects: their chats get the project's instructions; files are kept and searchable; deleting keeps chats.
+    async Task<bool> Refused(Func<Task> action)
+    {
+        try
+        {
+            await action();
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            return true;
+        }
+    }
+    var projectService = new ProjectService(db);
+    Check(await Refused(() => projectService.SaveAsync(null, new ProjectInput(" ", null), default)) &&
+          await Refused(() => projectService.SaveAsync(null, new ProjectInput("Långt", new string('x', 4001)), default)), "projects need a name and short enough instructions");
+    var walle = await projectService.SaveAsync(null, new ProjectInput("Göra med Walle", "Walle är ett år. Föreslå bara saker för småbarn."), default);
+    var projectChat = await new ConversationService(db).CreateAsync(default, walle.Id);
+    var projectChatService = new ChatService(db, new OllamaClient(http), gate, registry, calibration, NullLogger<ChatService>.Instance,
+        null, null, projectService);
+    await projectChatService.GenerateAsync(projectChat.Id, new ChatRequest("Vad hittar vi på?", "test", false), _ => Task.CompletedTask, default);
+    Check(handler.LastMessages.Contains("Göra med Walle") && handler.LastMessages.Contains("Föreslå bara saker för småbarn"), "a project's chats get its instructions");
+    var leaseBytes = System.Text.Encoding.UTF8.GetBytes("Hyran för lägenheten är 9 450 kronor i månaden.\nAvtalet gäller från 1 oktober.");
+    var lease = await uploadStore.SaveAsync(db, "hyresavtal.txt", new MemoryStream(leaseBytes), leaseBytes.Length, default);
+    await projectService.AddFileAsync(walle.Id, lease.Id, default);
+    Check(await Refused(() => projectService.AddFileAsync(walle.Id, image.Id, default)), "projects keep documents, not photos");
+    Check((await projectService.ListAsync(default)).Single(p => p.Id == walle.Id) is { Chats: 1, Files: [{ Name: "hyresavtal.txt" }] },
+        "a project lists its chats and files");
+    lease.CreatedAt = DateTime.UtcNow.AddDays(-2);
+    db.SaveChanges();
+    await uploadStore.CleanupAsync(db, default);
+    Check(await db.Uploads.AnyAsync(u => u.Id == lease.Id), "project files are not cleaned up like old attachments");
+
+    var pages = new DocumentReader.Extracted(true, ["Första sidan.", new string('a', 2500), "Sista."]);
+    var chunked = DocumentIndex.Chunk(pages, "page");
+    Check(chunked[0].Location == "page 1" && chunked.Count(c => c.Location == "page 2") == 3 && chunked[^1].Location == "page 3" &&
+          chunked.All(c => c.Text.Length <= 1000), "documents are cut into passages that remember their page");
+    using var embeddingHttp = new HttpClient(new FakeEmbeddings()) { BaseAddress = new Uri("http://ollama.test") };
+    var embeddings = new Embeddings(embeddingHttp, config);
+    var indexServiceCollection = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+    Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped<CurrentProfile>(indexServiceCollection);
+    Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped(indexServiceCollection, provider =>
+        new ChatDb(new DbContextOptionsBuilder<ChatDb>().UseSqlite(connection).Options,
+            Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<CurrentProfile>(provider)));
+    Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(indexServiceCollection, uploadStore);
+    using var indexServices = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(indexServiceCollection);
+    var indexer = new DocumentIndexer(
+        Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(indexServices),
+        embeddings, gate, NullLogger<DocumentIndexer>.Instance);
+    var owner = new Profile { Id = 1, Owner = true, Name = "Adam" };
+    await indexer.IndexProfileAsync(owner, default);
+    var documentIndex = new DocumentIndex(db, embeddings);
+    var leaseHits = await documentIndex.SearchAsync("Vad är hyran för lägenheten?", walle.Id, 3, default);
+    Check(leaseHits.FirstOrDefault() is { Document.Name: "hyresavtal.txt", Location: "line 1" } first && first.Document.ProjectId == walle.Id &&
+          first.Text.Contains("9 450"), "documents are indexed and found by meaning");
+    var leaseIndexedAt = (await db.Documents.AsNoTracking().SingleAsync(d => d.Name == "hyresavtal.txt")).IndexedAt;
+    await indexer.IndexProfileAsync(owner, default);
+    Check((await db.Documents.AsNoTracking().SingleAsync(d => d.Name == "hyresavtal.txt")).IndexedAt == leaseIndexedAt,
+        "unchanged documents are not indexed again");
+    var documentRegistry = new ToolRegistry(new TestClients(), web, files, config, documents: documentIndex) { ProjectId = walle.Id };
+    await documentRegistry.PrepareAsync(photoChat, default);
+    var searched = await documentRegistry.ExecuteAsync(Call("search_documents", new { query = "hyran" }), photoChat, default);
+    Check(documentRegistry.Definitions(photoChat).Select(ToolSelector.NameOf).Contains("search_documents") &&
+          searched.Content.Contains("project file hyresavtal.txt, line 1") && searched.Content.Contains("untrusted"), "search_documents names the document and where in it");
+    var projectSearchChat = new ChatService(db, new OllamaClient(http), gate, registry, calibration, NullLogger<ChatService>.Instance,
+        null, null, projectService, null, documentIndex);
+    var projectEvents = new List<ChatEvent>();
+    await projectSearchChat.GenerateAsync(projectChat.Id, new ChatRequest("Vad är hyran för lägenheten?", "test", false), e =>
+    {
+        projectEvents.Add(e);
+        return Task.CompletedTask;
+    }, default);
+    Check(handler.LastMessages.Contains("9 450") && projectEvents.Any(e => e.Type == "tool_finished" && e.Name == "search_documents") &&
+          await db.ToolEvidence.AnyAsync(e => e.ConversationId == projectChat.Id && e.ToolName == "search_documents"),
+        "a project chat brings matching passages from its files to every question");
+    await projectService.DeleteAsync(walle.Id, default);
+    await indexer.IndexProfileAsync(owner, default);
+    Check((await db.Conversations.AsNoTracking().SingleAsync(c => c.Id == projectChat.Id)).ProjectId == null &&
+          !await db.Uploads.AnyAsync(u => u.Id == lease.Id) && !await db.Documents.AnyAsync(d => d.Name == "hyresavtal.txt"),
+        "deleting a project keeps its chats and takes its files out of the index");
     handler.Vision = false;
     await visionChat.GenerateAsync(conversation.Id, new ChatRequest("And now?", "test", false), _ => Task.CompletedTask, default);
     Check(handler.LastImageCount == 0 && handler.LastMessages.Contains("[Earlier attachment: photo.jpg]"), "earlier images are not sent again");
@@ -628,6 +709,11 @@ try
     var mailPick = Picked("Läs mitt senaste mejl från Anna och svara att det går bra");
     Check(mailPick.Contains("mail_send") && mailPick.Contains("search_web") && !mailPick.Contains("home_action") &&
           !mailPick.Contains("create_file") && mailPick.Count < everyTool.Length, "a mail question gets the mail tools, not the rest");
+    var documentDefinitions = allDefinitions.Append(new { type = "function", function = new { name = "search_documents" } }).ToList();
+    Check(ToolSelector.Select(documentDefinitions, "Vad står det i hyresavtalet om uppsägning?", [], false, false).Tools.Select(ToolSelector.NameOf).Contains("search_documents") &&
+          ToolSelector.Select(documentDefinitions, "Vad hittar vi på i helgen?", [], false, false, null, projectFiles: true).Tools.Select(ToolSelector.NameOf).Contains("search_documents") &&
+          !ToolSelector.Select(documentDefinitions, "Hur blir vädret?", [], false, false).Tools.Select(ToolSelector.NameOf).Contains("search_documents"),
+        "document search is picked for questions about papers, and always in a project with files");
     var photoDefinitions = allDefinitions.Append(new { type = "function", function = new { name = PhotoTools.Name } }).ToList();
     Check(ToolSelector.Select(photoDefinitions, "Kan du fixa den här?", [], false, true).Tools.Select(ToolSelector.NameOf).Contains(PhotoTools.Name) &&
           !ToolSelector.Select(photoDefinitions, "Vad blir det för väder?", [], false, false).Tools.Select(ToolSelector.NameOf).Contains(PhotoTools.Name),
@@ -977,6 +1063,26 @@ sealed class TestClients : IHttpClientFactory
 sealed class FakeClients(HttpMessageHandler handler) : IHttpClientFactory
 {
     public HttpClient CreateClient(string name) => new(handler, false);
+}
+// An embedding model: words hashed into a small normalized vector, so passages sharing words are close.
+sealed class FakeEmbeddings : HttpMessageHandler
+{
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        if (request.RequestUri!.AbsolutePath == "/api/tags")
+            return new(HttpStatusCode.OK) { Content = new StringContent("{\"models\":[{\"name\":\"qwen3-embedding:0.6b\"}]}") };
+        using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+        var vectors = body.RootElement.GetProperty("input").EnumerateArray().Select(input =>
+        {
+            var vector = new double[64];
+            foreach (var word in TextMatch.Words(input.GetString()).Where(w => w.Length >= 3))
+                // A fixed hash: string.GetHashCode changes from run to run.
+                vector[word.Aggregate(17, (hash, c) => unchecked(hash * 31 + c)) & 63] += 1;
+            var length = Math.Sqrt(vector.Sum(v => v * v));
+            return vector.Select(v => length == 0 ? 0 : v / length).ToArray();
+        });
+        return new(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new { embeddings = vectors })) };
+    }
 }
 // The photo service: "removes" by copying the photo, or finds nothing.
 sealed class FakePhotoService : HttpMessageHandler

@@ -46,6 +46,16 @@ builder.Services.AddScoped<HomeAssistantService>();
 builder.Services.AddScoped<AutomationService>();
 builder.Services.AddScoped<PersonalTools>();
 builder.Services.AddScoped<PhotoTools>();
+builder.Services.AddScoped<ProjectService>();
+builder.Services.AddScoped<ResearchService>();
+builder.Services.AddScoped<DocumentIndex>();
+builder.Services.AddSingleton<DocumentIndexer>();
+builder.Services.AddHostedService(services => services.GetRequiredService<DocumentIndexer>());
+builder.Services.AddHttpClient<Embeddings>(client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["Ollama:BaseUrl"] ?? "http://localhost:11434");
+    client.Timeout = TimeSpan.FromMinutes(2);
+});
 builder.Services.AddScoped<SpotifyService>();
 builder.Services.AddSingleton<SpotifyLogins>();
 builder.Services.AddSingleton<ConcertService>();
@@ -211,6 +221,8 @@ app.MapRemoteEndpoints();
 app.MapProfileEndpoints();
 app.MapSkillEndpoints();
 app.MapTrustedSiteEndpoints();
+app.MapProjectEndpoints();
+app.MapDocumentEndpoints();
 app.MapMailEndpoints();
 app.MapSpeechEndpoints();
 app.MapAskEndpoints();

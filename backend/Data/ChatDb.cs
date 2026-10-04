@@ -31,6 +31,9 @@ public class ChatDb(DbContextOptions<ChatDb> options, CurrentProfile? current = 
     public DbSet<Watch> Watches => Set<Watch>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<TrustedSite> TrustedSites => Set<TrustedSite>();
+    public DbSet<Project> Projects => Set<Project>();
+    public DbSet<IndexedDocument> Documents => Set<IndexedDocument>();
+    public DbSet<DocumentChunk> DocumentChunks => Set<DocumentChunk>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -70,6 +73,17 @@ public class ChatDb(DbContextOptions<ChatDb> options, CurrentProfile? current = 
         Owned<Skill>(model);
         Owned<TrustedSite>(model);
         model.Entity<TrustedSite>().HasIndex(s => new { s.ProfileId, s.Host }).IsUnique();
+        Owned<Project>(model);
+        Owned<IndexedDocument>(model);
+        Owned<DocumentChunk>(model);
+        // Deleting a project keeps its chats (they move back to the main list) and removes its files.
+        model.Entity<Conversation>().HasOne<Project>().WithMany().HasForeignKey(c => c.ProjectId)
+            .OnDelete(DeleteBehavior.SetNull);
+        model.Entity<Upload>().HasOne<Project>().WithMany().HasForeignKey(u => u.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+        model.Entity<IndexedDocument>().HasIndex(d => new { d.ProfileId, d.Source, d.Key }).IsUnique();
+        model.Entity<DocumentChunk>().HasOne<IndexedDocument>().WithMany().HasForeignKey(c => c.DocumentId)
+            .OnDelete(DeleteBehavior.Cascade);
         // Devices are listed across profiles on the computer only, so they are not filtered.
         model.Entity<DeviceSession>().HasIndex(d => d.ProfileId);
 

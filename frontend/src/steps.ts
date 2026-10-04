@@ -200,6 +200,12 @@ export function describeStep(
         title: running ? 'Checking the weather' : 'Checked the weather',
         detail: text(args.date) || 'today',
       };
+    case 'search_documents':
+      return {
+        icon: 'fileSearch',
+        title: running ? 'Searching your documents' : 'Searched your documents',
+        detail: text(args.query) ? `“${text(args.query)}”` : '',
+      };
     case 'remove_from_photo':
       return {
         icon: 'image',
