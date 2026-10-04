@@ -216,3 +216,7 @@ Runs are persisted and stream over reconnectable SSE, so reloading or closing th
 ## Security
 
 Started with `dotnet run`, the backend listens on localhost only; the installed service turns on phone access, which opens port 5080 on your network. The computer itself needs no sign-in; phones pair with a one-time code (see Phone access) and Siri uses a key that only works for `/api/ask`. Account passwords and tokens are encrypted with ASP.NET Data Protection. Everything personal stays out of git: the database, `backend/keys`, `backend/personal`, `backend/uploads`, `backend/workspace` and `.env` are ignored. Commands run as your user without a sandbox, so read each one before approving it.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
