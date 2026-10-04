@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import type { AttachmentRef, Message, ToolStep } from '../api';
 import { describeSize, docBadge } from '../attachments';
 import { CodeBlock, CopyButton, DraftCard, MailStepCard } from './CodeBlock';
+import { ImageViewerProvider, useOpenImage } from './ImageViewer';
 import { MailList } from './MailList';
 import { Icon, Mark, type IconName } from '../icons';
 import { describeStep, statusLabels } from '../steps';
@@ -46,29 +47,36 @@ function Step({ step }: { step: ToolStep }) {
 }
 
 function MessageAttachments({ attachments }: { attachments: AttachmentRef[] }) {
+  const openImage = useOpenImage();
   return (
     <div className="message-attachments">
-      {attachments.map((a) => (
-        <a
-          key={a.id}
-          className={a.kind === 'image' ? 'message-image' : 'message-doc'}
-          href={`/api/uploads/${a.id}`}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          {a.kind === 'image' ? (
+      {attachments.map((a) =>
+        a.kind === 'image' ? (
+          <button
+            type="button"
+            key={a.id}
+            className="message-image"
+            aria-label={`Open ${a.name}`}
+            onClick={() => openImage(a)}
+          >
             <img src={`/api/uploads/${a.id}`} alt={a.name} loading="lazy" />
-          ) : (
-            <>
-              <span className="doc-badge">{docBadge(a.name)}</span>
-              <span className="doc-text">
-                <b>{a.name}</b>
-                <small>{describeSize(a.size)}</small>
-              </span>
-            </>
-          )}
-        </a>
-      ))}
+          </button>
+        ) : (
+          <a
+            key={a.id}
+            className="message-doc"
+            href={`/api/uploads/${a.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span className="doc-badge">{docBadge(a.name)}</span>
+            <span className="doc-text">
+              <b>{a.name}</b>
+              <small>{describeSize(a.size)}</small>
+            </span>
+          </a>
+        ),
+      )}
     </div>
   );
 }
@@ -279,90 +287,92 @@ export function Thread(props: ThreadProps) {
   const lastReply = messages.reduce((last, m, i) => (m.role !== 'user' ? i : last), -1);
 
   return (
-    <div className="thread">
-      {messages.map((m, i) => {
-        if (m.role !== 'user') {
-          const live = busy && i === messages.length - 1;
+    <ImageViewerProvider>
+      <div className="thread">
+        {messages.map((m, i) => {
+          if (m.role !== 'user') {
+            const live = busy && i === messages.length - 1;
+            return (
+              <Reply
+                key={m.id ?? `live-${i}`}
+                m={m}
+                index={i}
+                busy={busy}
+                live={live}
+                status={live ? currentStatus : undefined}
+                isLast={i === lastReply}
+                speaking={speaking === i}
+                canInspect={!!props.onInspect}
+                canSaveSkill={!!props.onSaveSkill}
+                canSpeak={!!props.onSpeak}
+                handlers={handlers}
+              />
+            );
+          }
+          const isEditing = editing === m.id && m.id !== undefined;
           return (
-            <Reply
-              key={m.id ?? `live-${i}`}
-              m={m}
-              index={i}
-              busy={busy}
-              live={live}
-              status={live ? currentStatus : undefined}
-              isLast={i === lastReply}
-              speaking={speaking === i}
-              canInspect={!!props.onInspect}
-              canSaveSkill={!!props.onSaveSkill}
-              canSpeak={!!props.onSpeak}
-              handlers={handlers}
-            />
-          );
-        }
-        const isEditing = editing === m.id && m.id !== undefined;
-        return (
-          <article className="user" key={m.id ?? `live-${i}`}>
-            {isEditing ? (
-              <form
-                className="edit-form"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (draft.trim()) {
-                    setEditing(null);
-                    onEdit(m, draft.trim());
-                  }
-                }}
-              >
-                <textarea
-                  aria-label="Edit message"
-                  value={draft}
-                  rows={Math.min(8, Math.max(2, draft.split('\n').length))}
-                  autoFocus
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') {
+            <article className="user" key={m.id ?? `live-${i}`}>
+              {isEditing ? (
+                <form
+                  className="edit-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (draft.trim()) {
                       setEditing(null);
+                      onEdit(m, draft.trim());
                     }
                   }}
-                />
-                <p>Sending replaces this message and every reply after it.</p>
-                <div className="edit-actions">
-                  <button type="button" className="secondary" onClick={() => setEditing(null)}>
-                    Cancel
-                  </button>
-                  <button className="primary" disabled={!draft.trim()}>
-                    Send
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <>
-                {m.attachments && m.attachments.length > 0 && (
-                  <MessageAttachments attachments={m.attachments} />
-                )}
-                {m.content && <div className="bubble">{m.content}</div>}
-                {!busy && m.id !== undefined && (
-                  <div className="message-actions">
-                    <button
-                      className="message-action"
-                      aria-label="Edit message"
-                      title="Edit"
-                      onClick={() => {
-                        setDraft(m.content);
-                        setEditing(m.id ?? null);
-                      }}
-                    >
-                      <Icon name="pencil" size={15} />
+                >
+                  <textarea
+                    aria-label="Edit message"
+                    value={draft}
+                    rows={Math.min(8, Math.max(2, draft.split('\n').length))}
+                    autoFocus
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        setEditing(null);
+                      }
+                    }}
+                  />
+                  <p>Sending replaces this message and every reply after it.</p>
+                  <div className="edit-actions">
+                    <button type="button" className="secondary" onClick={() => setEditing(null)}>
+                      Cancel
                     </button>
-                    <CopyButton text={m.content} />
+                    <button className="primary" disabled={!draft.trim()}>
+                      Send
+                    </button>
                   </div>
-                )}
-              </>
-            )}
-          </article>
-        );
-      })}
-    </div>
+                </form>
+              ) : (
+                <>
+                  {m.attachments && m.attachments.length > 0 && (
+                    <MessageAttachments attachments={m.attachments} />
+                  )}
+                  {m.content && <div className="bubble">{m.content}</div>}
+                  {!busy && m.id !== undefined && (
+                    <div className="message-actions">
+                      <button
+                        className="message-action"
+                        aria-label="Edit message"
+                        title="Edit"
+                        onClick={() => {
+                          setDraft(m.content);
+                          setEditing(m.id ?? null);
+                        }}
+                      >
+                        <Icon name="pencil" size={15} />
+                      </button>
+                      <CopyButton text={m.content} />
+                    </div>
+                  )}
+                </>
+              )}
+            </article>
+          );
+        })}
+      </div>
+    </ImageViewerProvider>
   );
 }
