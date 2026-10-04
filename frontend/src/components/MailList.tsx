@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { readStorage, send, writeStorage, type MailItem } from '../api';
+import { readStorage, send, writeStorage, type MailItem, errorText } from '../api';
 import { Icon } from '../icons';
+import { clock } from '../format';
 
 type Action = 'delete' | 'archive' | 'mark_read';
 
@@ -34,7 +35,7 @@ function shortDate(value: string) {
     return value;
   }
   return date.toDateString() === new Date().toDateString()
-    ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    ? clock(date)
     : date.toLocaleDateString([], { day: 'numeric', month: 'short' });
 }
 
@@ -86,7 +87,7 @@ export function MailList({ items }: { items: MailItem[] }) {
       }
       setSelected(new Set());
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { api, send, type Account, type AccountKind } from '../api';
+import { api, send, type Account, type AccountKind, errorText } from '../api';
 import { Icon, type IconName } from '../icons';
+import { ErrorAlert } from './ErrorAlert';
+import { Field } from './Field';
 
 type Draft = {
   id?: number;
@@ -80,8 +82,7 @@ function TextField(props: {
   onChange: (value: string) => void;
 }) {
   return (
-    <div className="field">
-      <label htmlFor={props.id}>{props.label}</label>
+    <Field id={props.id} label={props.label} hint={props.hint}>
       <input
         id={props.id}
         type={props.type ?? 'text'}
@@ -91,12 +92,7 @@ function TextField(props: {
         aria-describedby={props.hint ? `${props.id}-hint` : undefined}
         onChange={(e) => props.onChange(e.target.value)}
       />
-      {props.hint && (
-        <p className="hint" id={`${props.id}-hint`}>
-          {props.hint}
-        </p>
-      )}
-    </div>
+    </Field>
   );
 }
 
@@ -119,7 +115,7 @@ export function AccountsSection({
     if (draft?.kind === 'spotify' && !redirectUris.length) {
       api<{ redirectUris: string[] }>('/spotify/setup')
         .then((setup) => setRedirectUris(setup.redirectUris))
-        .catch((e) => setError(String(e)));
+        .catch((e) => setError(errorText(e)));
     }
   }, [draft?.kind]);
 
@@ -137,7 +133,7 @@ export function AccountsSection({
       });
       window.location.assign(url);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
       setSaving(false);
     }
   }
@@ -150,7 +146,7 @@ export function AccountsSection({
     if (open) {
       setDraft(null);
       setError('');
-      load().catch((e) => setError(String(e)));
+      load().catch((e) => setError(errorText(e)));
     }
   }, [open]);
 
@@ -193,7 +189,7 @@ export function AccountsSection({
       setDraft(null);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }
@@ -205,7 +201,7 @@ export function AccountsSection({
       const result = await send<{ message: string }>(`/accounts/${account.id}/test`, 'POST');
       setStatus((s) => ({ ...s, [account.id]: result.message }));
     } catch (e) {
-      setStatus((s) => ({ ...s, [account.id]: e instanceof Error ? e.message : String(e) }));
+      setStatus((s) => ({ ...s, [account.id]: errorText(e) }));
     }
   }
 
@@ -213,7 +209,7 @@ export function AccountsSection({
     if (!window.confirm(`Remove ${account.label}? Leona forgets the saved password.`)) {
       return;
     }
-    await send(`/accounts/${account.id}`, 'DELETE').catch((e) => setError(String(e)));
+    await send(`/accounts/${account.id}`, 'DELETE').catch((e) => setError(errorText(e)));
     await load();
   }
 
@@ -485,11 +481,7 @@ export function AccountsSection({
               />
             </>
           )}
-          {error && (
-            <div role="alert" className="error">
-              {error}
-            </div>
-          )}
+          <ErrorAlert error={error} />
           <div className="dialog-actions">
             <button type="button" className="secondary" onClick={() => setDraft(null)}>
               Cancel
@@ -500,11 +492,7 @@ export function AccountsSection({
           </div>
         </form>
       )}
-      {!draft && error && (
-        <div role="alert" className="error">
-          {error}
-        </div>
-      )}
+      {!draft && <ErrorAlert error={error} />}
     </section>
   );
 }

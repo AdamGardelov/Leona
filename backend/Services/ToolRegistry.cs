@@ -497,26 +497,14 @@ public partial class ToolRegistry(
 
     private async Task<ToolResult> SearchAsync(string query, CancellationToken ct)
     {
-        var client = clients.CreateClient("search");
-        List<(string Title, string Url, string Snippet)> results;
         var searx = configuration["Tools:SearxngUrl"];
-        if (!string.IsNullOrWhiteSpace(searx))
-        {
-            var json = await client.GetStringAsync(
-                $"{searx.TrimEnd('/')}/search?q={Uri.EscapeDataString(query)}&format=json", ct);
-            using var doc = JsonDocument.Parse(json);
-            results = doc.RootElement.GetProperty("results").EnumerateArray().Take(Limits.SearchResults)
-                .Select(r => (r.GetProperty("title").GetString() ?? "Result", r.GetProperty("url").GetString() ?? "",
-                    r.TryGetProperty("content", out var c) ? c.GetString() ?? "" : "")).ToList();
-        }
-        else
-        {
+        if (string.IsNullOrWhiteSpace(searx))
             return new ToolResult(
                 "Tool failed: SearXNG is not configured. Set Tools:SearxngUrl and start the search service.",
                 Status: ToolStatus.Failed, Summary: "SearXNG is not configured");
-        }
 
-        var valid = results
+        var results = await Searx.SearchAsync(clients.CreateClient("search"), searx, query, ct);
+        var valid = results.Take(Limits.SearchResults)
             .Where(r => Uri.TryCreate(r.Url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
             .ToList();
         // Result addresses come from the search provider, not from text the model was shown.

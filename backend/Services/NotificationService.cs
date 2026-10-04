@@ -96,8 +96,8 @@ public sealed class NotificationService(
         var notification = new Notification
         {
             ProfileId = profileId,
-            Title = ContextBudget.Excerpt(title, 120).Replace("\n[Excerpt truncated]", "…"),
-            Body = ContextBudget.Excerpt(body, 600).Replace("\n[Excerpt truncated]", "…"),
+            Title = ContextBudget.Excerpt(title, 120, "…"),
+            Body = ContextBudget.Excerpt(body, 600, "…"),
             Url = url
         };
         db.Notifications.Add(notification);

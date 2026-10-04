@@ -41,6 +41,13 @@ public sealed class RunManager(IServiceScopeFactory scopes, ILogger<RunManager> 
         }
     }
 
+    private Task ChangeAsync(Func<ChatDb, Task> action, int? profileId = null) =>
+        ChangeAsync(async db =>
+        {
+            await action(db);
+            return true;
+        }, profileId);
+
     // Rewinding deletes the given user message and everything after it, so the run replaces that turn.
     public Task<AgentRun?> CreateAsync(int profileId, int conversationId, ChatRequest request,
         int? rewindFromMessageId = null) =>
@@ -157,11 +164,10 @@ public sealed class RunManager(IServiceScopeFactory scopes, ILogger<RunManager> 
     private static RunEvent Event(Guid id, object value) =>
         new() { RunId = id, Json = JsonSerializer.Serialize(value, Json) };
 
-    private Task<bool> EmitAsync(Guid id, object value) => ChangeAsync(async db =>
+    private Task EmitAsync(Guid id, object value) => ChangeAsync(async db =>
     {
         db.RunEvents.Add(Event(id, value));
         await db.SaveChangesAsync();
-        return true;
     });
 
     public override async Task StartAsync(CancellationToken cancellationToken)
@@ -188,7 +194,6 @@ public sealed class RunManager(IServiceScopeFactory scopes, ILogger<RunManager> 
                 .ExecuteUpdateAsync(s => s.SetProperty(a => a.Status, ActionStatus.Interrupted),
                     cancellationToken: cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
-            return true;
         });
         await base.StartAsync(cancellationToken);
     }
@@ -282,7 +287,6 @@ public sealed class RunManager(IServiceScopeFactory scopes, ILogger<RunManager> 
                 }
 
                 _cancellations.TryRemove(id, out _);
-                return true;
             });
         }
     }
@@ -336,7 +340,6 @@ public sealed class RunManager(IServiceScopeFactory scopes, ILogger<RunManager> 
                 {
                     db.RunActions.Add(action);
                     await db.SaveChangesAsync(ct);
-                    return true;
                 });
                 return failure;
             }
@@ -368,7 +371,6 @@ public sealed class RunManager(IServiceScopeFactory scopes, ILogger<RunManager> 
                 }
 
                 await db.SaveChangesAsync(ct);
-                return true;
             });
             if (needsApproval)
             {
@@ -394,7 +396,6 @@ public sealed class RunManager(IServiceScopeFactory scopes, ILogger<RunManager> 
                         db.RunEvents.Add(Event(runId,
                             new { type = "approval_resolved", approvalId = action.Id, approved = false }));
                         await db.SaveChangesAsync(ct);
-                        return true;
                     });
                     return new ToolResult("Tool unavailable: approval expired. No action executed.",
                         Status: ToolStatus.Expired, Summary: "Approval expired");
@@ -427,7 +428,6 @@ public sealed class RunManager(IServiceScopeFactory scopes, ILogger<RunManager> 
                     .SetProperty(a => a.Status,
                         result.Status == ToolStatus.Failed ? ActionStatus.Failed : ActionStatus.Completed)
                     .SetProperty(a => a.Result, ContextBudget.Excerpt(result.Content, 1800)), cancellationToken: ct);
-                return true;
             });
             return result;
         }

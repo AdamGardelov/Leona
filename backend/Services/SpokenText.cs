@@ -18,7 +18,7 @@ public static partial class SpokenText
         text = Heading().Replace(text, "");
         text = Markup().Replace(text, "");
         text = Paragraphs().Replace(text, ".\n");
-        return Spaces().Replace(text, " ").Trim();
+        return TextMatch.Collapse(text);
     }
 
     [GeneratedRegex(@"\n#{1,3} Sources\n")]
@@ -50,7 +50,4 @@ public static partial class SpokenText
 
     [GeneratedRegex(@"\n{2,}")]
     private static partial Regex Paragraphs();
-
-    [GeneratedRegex(@"\s+")]
-    private static partial Regex Spaces();
 }

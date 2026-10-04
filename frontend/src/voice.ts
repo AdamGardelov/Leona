@@ -1,4 +1,4 @@
-import { api } from './api';
+import { api, send } from './api';
 
 // Voice for Leona: recordings are turned into text on the computer (KB-Whisper), and replies are read aloud
 // with the device's own voices. Recording needs a secure page: the computer itself or the Tailscale https
@@ -125,17 +125,10 @@ function wav(samples: Float32Array) {
   return new Blob([buffer], { type: 'audio/wav' });
 }
 
+// The recording's type (audio/wav) goes along as its Content-Type.
 export async function transcribe(audio: Blob) {
-  const response = await fetch('/api/speech/transcribe?language=sv', {
-    method: 'POST',
-    headers: { 'Content-Type': 'audio/wav' },
-    body: audio,
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(body.error ?? `Speech recognition failed (${response.status})`);
-  }
-  return String(body.text ?? '').trim();
+  const result = await send<{ text?: string }>('/speech/transcribe?language=sv', 'POST', audio);
+  return String(result?.text ?? '').trim();
 }
 
 export async function speechAvailable() {

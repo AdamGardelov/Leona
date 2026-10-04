@@ -447,7 +447,7 @@ try
     Check(ToolRegistry.RequiresApproval(Call("mail_draft", new { }), new ChatRequest("x", "test", false, Accounts: true, Scheduled: true)) &&
           !ToolRegistry.RequiresApproval(Call("mail_draft", new { }), new ChatRequest("x", "test", false, Accounts: true)),
         "scheduled tasks ask before saving an e-mail draft");
-    Check(MailService.HtmlToText("<p>Hello</p><p>World <b>!</b></p><style>x{}</style>") == "Hello\nWorld !" &&
+    Check(PageTextExtractor.HtmlToText("<p>Hello</p><p>World <b>!</b></p><style>x{}</style>") == "Hello\nWorld !" &&
           MailService.ParseId("3/42/INBOX/Archive") == (3, new MailKit.UniqueId(42), "INBOX/Archive"), "mail text and ids are parsed");
 
     // Deleting calendar events over CalDAV: a single event, one occurrence of a series, and stale versions.

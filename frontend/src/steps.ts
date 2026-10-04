@@ -182,6 +182,24 @@ export function describeStep(
         title: running ? 'Looking for concerts' : 'Looked for concerts',
         detail: text(args.artist) || 'Göteborg',
       };
+    case 'find_jobs':
+      return {
+        icon: 'search',
+        title: running ? 'Looking for jobs' : 'Looked for jobs',
+        detail: text(args.queries),
+      };
+    case 'find_activities':
+      return {
+        icon: 'calendar',
+        title: running ? 'Looking for things to do' : 'Looked for things to do',
+        detail: text(args.date) || 'today',
+      };
+    case 'weather':
+      return {
+        icon: 'sun',
+        title: running ? 'Checking the weather' : 'Checked the weather',
+        detail: text(args.date) || 'today',
+      };
     case 'watch_page':
       return {
         icon: 'eye',

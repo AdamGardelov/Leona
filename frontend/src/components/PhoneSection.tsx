@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { api, send, type Profile } from '../api';
+import { api, send, type Profile, errorText } from '../api';
 import { Icon } from '../icons';
+import { ErrorAlert } from './ErrorAlert';
+import { clock } from '../format';
 
 type Device = { id: number; name: string; createdAt: string; profile: string };
 type Status = { enabled: boolean; addresses: string[]; devices: Device[] };
@@ -24,7 +26,7 @@ export function PhoneSection({ open, current }: { open: boolean; current: Profil
     if (open) {
       setError('');
       setPairing(null);
-      load().catch((e) => setError(String(e)));
+      load().catch((e) => setError(errorText(e)));
     }
   }, [open]);
 
@@ -33,7 +35,7 @@ export function PhoneSection({ open, current }: { open: boolean; current: Profil
     try {
       setPairing(await send<Pairing>('/remote/pairings', 'POST', { profileId }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   }
 
@@ -42,7 +44,7 @@ export function PhoneSection({ open, current }: { open: boolean; current: Profil
       await send(`/remote/devices/${device.id}`, 'DELETE');
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   }
 
@@ -82,13 +84,7 @@ export function PhoneSection({ open, current }: { open: boolean; current: Profil
               <span className="pairing-code mono" aria-label="Pairing code">
                 {pairing.code}
               </span>
-              <span className="hint">
-                Valid once, until{' '}
-                {new Date(pairing.expiresAt).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </span>
+              <span className="hint">Valid once, until {clock(pairing.expiresAt)}</span>
               {pairing.links.map((link) => (
                 <a key={link} href={link} className="mono pairing-link">
                   {link}
@@ -123,11 +119,7 @@ export function PhoneSection({ open, current }: { open: boolean; current: Profil
           )}
         </>
       )}
-      {error && (
-        <div role="alert" className="error">
-          {error}
-        </div>
-      )}
+      <ErrorAlert error={error} />
     </section>
   );
 }

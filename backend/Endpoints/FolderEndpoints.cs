@@ -10,7 +10,7 @@ public static class FolderEndpoints
     {
         var group = app.MapGroup("/api/folders");
         group.MapGet("", ListAsync);
-        group.MapPost("", AddAsync);
+        group.MapPost("", AddAsync).WithInputErrors();
         group.MapDelete("/{id:int}", DeleteAsync);
     }
 
@@ -33,14 +33,7 @@ public static class FolderEndpoints
         if (!CanManage(context, profile))
             return Results.StatusCode(StatusCodes.Status403Forbidden);
 
-        try
-        {
-            return Results.Ok(await folders.AddAsync(request.Path, ct));
-        }
-        catch (ArgumentException ex)
-        {
-            return Results.BadRequest(new { error = ex.Message });
-        }
+        return Results.Ok(await folders.AddAsync(request.Path, ct));
     }
 
     private static async Task<IResult> DeleteAsync(int id, FolderService folders, HttpContext context,

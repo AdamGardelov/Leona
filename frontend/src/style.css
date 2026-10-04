@@ -188,7 +188,8 @@ a:focus-visible {
   color: var(--info);
   font-weight: 500;
 }
-.pill.running::before {
+.pill.running::before,
+.pill.waiting::before {
   content: '';
   width: 6px;
   height: 6px;
@@ -689,7 +690,8 @@ details p {
 }
 /* Code blocks and drafts: a small header with the kind and a copy button. */
 .code-block,
-.draft-card {
+.draft-card,
+.mail-list {
   margin: 14px 0;
   border: 1px solid var(--border-soft);
   border-radius: 12px;
@@ -730,7 +732,8 @@ details p {
   padding: 0 10px;
   font-size: calc(12px * var(--fs));
 }
-.draft-card {
+.draft-card,
+.mail-list {
   background: var(--surface);
 }
 .draft-fields {
@@ -761,22 +764,19 @@ details p {
   line-height: 1.6;
 }
 /* A mail search as a list to tick: sender and date on one line, the subject below. */
-.mail-list {
-  margin: 14px 0;
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
-  overflow: hidden;
-  background: var(--surface);
-}
 .mail-list-tools {
   display: flex;
   gap: 14px;
   padding-right: 10px;
 }
-.mail-list-tools .link-button {
+/* Quiet text buttons inside a card or bar. */
+.mail-list-tools .link-button,
+.listening .link-button {
   color: var(--text-2);
   font-weight: 500;
   text-decoration: none;
+}
+.mail-list-tools .link-button {
   font-size: calc(12px * var(--fs));
 }
 .mail-list-tools .link-button:hover {
@@ -881,21 +881,11 @@ details p {
   font-size: calc(13px * var(--fs));
   color: var(--muted);
 }
-.mail-actions .primary.small {
-  height: 34px;
-  padding: 0 12px;
-  gap: 6px;
-  font-size: calc(13px * var(--fs));
-  border-radius: 8px;
-}
 .mail-result {
   margin: 0;
   padding: 0 14px 12px;
   font-size: calc(13px * var(--fs));
   color: var(--muted);
-}
-.mail-result.error-text {
-  color: var(--error-text);
 }
 @media (max-width: 650px) {
   .mail-actions button {
@@ -956,11 +946,6 @@ details p {
   border-radius: 50%;
   background: #e5484d;
   transition: transform 0.08s linear;
-}
-.listening .link-button {
-  color: var(--text-2);
-  font-weight: 500;
-  text-decoration: none;
 }
 .listening-done {
   display: inline-flex;
@@ -1343,11 +1328,6 @@ textarea:focus-visible {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-}
-.usage p {
-  margin: 0;
-  font-size: calc(12px * var(--fs));
-  color: var(--muted);
 }
 .meter {
   height: 6px;
@@ -1755,10 +1735,12 @@ textarea:focus-visible {
   background: var(--text-2);
   transition: transform 0.15s;
 }
-.switch-row[aria-checked='true'] .switch {
+.switch-row[aria-checked='true'] .switch,
+.inline-switch[aria-checked='true'] .switch {
   background: var(--button);
 }
-.switch-row[aria-checked='true'] .switch::after {
+.switch-row[aria-checked='true'] .switch::after,
+.inline-switch[aria-checked='true'] .switch::after {
   transform: translateX(20px);
   background: var(--on-button);
 }
@@ -2327,13 +2309,6 @@ textarea:focus-visible {
   background: var(--warning-bg);
   color: var(--warning);
 }
-.pill.waiting::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
 
 /* Tool steps inside a reply */
 /* Tool steps are quiet lines in the reply, not cards. */
@@ -2456,16 +2431,6 @@ article.assistant:last-child .message-actions {
   min-height: 0;
   font-size: calc(14px * var(--fs));
 }
-.edit-form p {
-  margin: 0;
-  font-size: calc(12px * var(--fs));
-  color: var(--muted);
-}
-.edit-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
 
 /* Activity additions */
 .usage-stats {
@@ -2559,7 +2524,8 @@ article.assistant:last-child .message-actions {
 .dialog-loading {
   color: var(--muted);
 }
-.dialog-actions {
+.dialog-actions,
+.edit-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
@@ -2616,7 +2582,9 @@ article.assistant:last-child .message-actions {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.hint {
+.hint,
+.usage p,
+.edit-form p {
   margin: 0;
   font-size: calc(12px * var(--fs));
   color: var(--muted);
@@ -2757,14 +2725,6 @@ article.assistant:last-child .message-actions {
 .inspect-note.error {
   color: var(--error-text);
 }
-@media (max-width: 650px) {
-  .field-grid {
-    grid-template-columns: 1fr;
-  }
-  .tool-detail {
-    display: none;
-  }
-}
 
 /* Approval previews for edits and commands */
 .approval-preview.diff .added {
@@ -2800,7 +2760,8 @@ article.assistant:last-child .message-actions {
   text-transform: uppercase;
   color: var(--muted);
 }
-.settings-list {
+.settings-list,
+.notification-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -3057,6 +3018,24 @@ article.assistant:last-child .message-actions {
   align-items: center;
   gap: 8px;
 }
+/* What "Run now" did, on the card that was pressed. */
+.automation-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: calc(13px * var(--fs));
+  color: var(--info);
+}
+.automation-status.waiting {
+  color: var(--warning);
+}
+.automation-status.done {
+  color: var(--accent);
+}
+.automation-status.failed {
+  color: var(--error-text);
+}
 .automation-actions .message-action {
   margin-left: auto;
 }
@@ -3070,13 +3049,6 @@ article.assistant:last-child .message-actions {
   padding: 0;
   border: 0;
   background: none;
-}
-.inline-switch[aria-checked='true'] .switch {
-  background: var(--button);
-}
-.inline-switch[aria-checked='true'] .switch::after {
-  transform: translateX(20px);
-  background: var(--on-button);
 }
 .day-picker {
   display: flex;
@@ -3130,14 +3102,6 @@ article.assistant:last-child .message-actions {
 .push-panel small {
   font-size: calc(12.5px * var(--fs));
   color: var(--muted);
-}
-.notification-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 .notification-list a {
   display: flex;
@@ -3493,8 +3457,7 @@ button.profile-chip[aria-expanded='true'] {
   }
   .markdown .job-link,
   .listening-done,
-  .inspect-summary button,
-  .mail-actions .primary.small {
+  .inspect-summary button {
     height: 40px;
   }
 }

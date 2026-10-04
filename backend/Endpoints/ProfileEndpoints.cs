@@ -12,10 +12,10 @@ public static class ProfileEndpoints
         var group = app.MapGroup("/api/profiles");
         group.MapGet("", ListAsync);
         group.MapPost("", (ProfileInput input, ProfileService profiles, HttpContext context, CancellationToken ct) =>
-            SaveAsync(null, input, profiles, context, ct));
+            SaveAsync(null, input, profiles, context, ct)).WithInputErrors();
         group.MapPut("/{id:int}", (int id, ProfileInput input, ProfileService profiles, HttpContext context,
-            CancellationToken ct) => SaveAsync(id, input, profiles, context, ct));
-        group.MapDelete("/{id:int}", DeleteAsync);
+            CancellationToken ct) => SaveAsync(id, input, profiles, context, ct)).WithInputErrors();
+        group.MapDelete("/{id:int}", DeleteAsync).WithInputErrors();
         group.MapPost("/{id:int}/use", UseAsync);
     }
 
@@ -33,18 +33,7 @@ public static class ProfileEndpoints
         if (!RemoteAccess.IsLocal(context))
             return Results.StatusCode(StatusCodes.Status403Forbidden);
 
-        try
-        {
-            return Results.Ok(await profiles.SaveAsync(id, input.Name, ct));
-        }
-        catch (KeyNotFoundException)
-        {
-            return Results.NotFound();
-        }
-        catch (ArgumentException ex)
-        {
-            return Results.BadRequest(new { error = ex.Message });
-        }
+        return Results.Ok(await profiles.SaveAsync(id, input.Name, ct));
     }
 
     private static async Task<IResult> DeleteAsync(int id, ProfileService profiles, HttpContext context,
@@ -57,14 +46,6 @@ public static class ProfileEndpoints
         {
             await profiles.DeleteAsync(id, ct);
             return Results.NoContent();
-        }
-        catch (KeyNotFoundException)
-        {
-            return Results.NotFound();
-        }
-        catch (ArgumentException ex)
-        {
-            return Results.BadRequest(new { error = ex.Message });
         }
         catch (InvalidOperationException ex)
         {

@@ -9,6 +9,7 @@ import {
   type StepStatus,
   type ToolStep,
   type MailItem,
+  errorText,
 } from './api';
 import { describeStep } from './steps';
 
@@ -103,6 +104,16 @@ export function useRun(options: Options) {
     }));
   }
 
+  // Changes the timeline entry of one tool step.
+  function patchTimeline(
+    id: string | undefined,
+    change: (item: TimelineItem) => Partial<TimelineItem>,
+  ) {
+    setTimeline((previous) =>
+      previous.map((i) => (i.key === `tool-${id}` ? { ...i, ...change(i) } : i)),
+    );
+  }
+
   function upsertTimeline(item: TimelineItem) {
     setTimeline((previous) =>
       previous.some((i) => i.key === item.key)
@@ -167,20 +178,12 @@ export function useRun(options: Options) {
           expiresAt: event.expiresAt ?? '',
         });
         updateStep(event.approvalId, { status: 'awaiting_approval' });
-        setTimeline((previous) =>
-          previous.map((i) =>
-            i.key === `tool-${event.approvalId}` ? { ...i, state: 'waiting' } : i,
-          ),
-        );
+        patchTimeline(event.approvalId, () => ({ state: 'waiting' }));
         break;
       case 'approval_resolved':
         setApproval(null);
         updateStep(event.approvalId, { status: 'running' });
-        setTimeline((previous) =>
-          previous.map((i) =>
-            i.key === `tool-${event.approvalId}` ? { ...i, state: 'running' } : i,
-          ),
-        );
+        patchTimeline(event.approvalId, () => ({ state: 'running' }));
         break;
       case 'tool_finished': {
         const status = (event.status ?? 'completed') as StepStatus;
@@ -194,17 +197,10 @@ export function useRun(options: Options) {
           drafts: Array.isArray(drafts) ? drafts.map(String) : undefined,
           mails: Array.isArray(mails) && mails.length > 0 ? (mails as MailItem[]) : undefined,
         });
-        setTimeline((previous) =>
-          previous.map((i) =>
-            i.key === `tool-${event.id}`
-              ? {
-                  ...i,
-                  text: event.text ? `${i.text.split(' · ')[0]} · ${event.text}` : i.text,
-                  state: stepState(status),
-                }
-              : i,
-          ),
-        );
+        patchTimeline(event.id, (i) => ({
+          text: event.text ? `${i.text.split(' · ')[0]} · ${event.text}` : i.text,
+          state: stepState(status),
+        }));
         break;
       }
       case 'truncated':
@@ -250,7 +246,7 @@ export function useRun(options: Options) {
         }
       })
       .catch((e) => {
-        latest.current.setError(String(e));
+        latest.current.setError(errorText(e));
         latest.current.onFinished(run, null);
       })
       .finally(() => {
@@ -311,7 +307,7 @@ export function useRun(options: Options) {
       await send(`/runs/${runId}/cancel`, 'POST');
       upsertTimeline({ key: 'stopping', text: 'Stopping…', state: 'info' });
     } catch (e) {
-      latest.current.setError(e instanceof Error ? e.message : String(e));
+      latest.current.setError(errorText(e));
     }
   }
 
@@ -325,7 +321,7 @@ export function useRun(options: Options) {
       setApproval(null);
       latest.current.setError('');
     } catch (e) {
-      latest.current.setError(e instanceof Error ? e.message : String(e));
+      latest.current.setError(errorText(e));
     } finally {
       setDeciding(false);
     }

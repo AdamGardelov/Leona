@@ -19,9 +19,9 @@ public static class AutomationEndpoints
         var accounts = app.MapGroup("/api/accounts");
         accounts.MapGet("", (AccountService service, CancellationToken ct) => service.ListAsync(ct));
         accounts.MapPost("", (AccountInput input, AccountService service, HttpContext context, CancellationToken ct) =>
-            SaveAccountAsync(null, input, service, context, ct));
+            SaveAccountAsync(null, input, service, context, ct)).WithInputErrors();
         accounts.MapPut("/{id:int}", (int id, AccountInput input, AccountService service, HttpContext context, CancellationToken ct) =>
-            SaveAccountAsync(id, input, service, context, ct));
+            SaveAccountAsync(id, input, service, context, ct)).WithInputErrors();
         accounts.MapDelete("/{id:int}", async (int id, AccountService service, CancellationToken ct) =>
             await service.DeleteAsync(id, ct) ? Results.NoContent() : Results.NotFound());
         accounts.MapPost("/{id:int}/test", TestAccountAsync);
@@ -49,17 +49,10 @@ public static class AutomationEndpoints
         push.MapPost("/subscribe", async (SubscribeInput input, NotificationService service, HttpContext context,
             CurrentProfile profile, CancellationToken ct) =>
         {
-            try
-            {
-                await service.SubscribeAsync(profile.Id!.Value, input.Endpoint, input.Keys.P256dh, input.Keys.Auth,
-                    RemoteAccess.DeviceName(context.Request.Headers.UserAgent.ToString()), ct);
-                return Results.NoContent();
-            }
-            catch (ArgumentException ex)
-            {
-                return Results.BadRequest(new { error = ex.Message });
-            }
-        });
+            await service.SubscribeAsync(profile.Id!.Value, input.Endpoint, input.Keys.P256dh, input.Keys.Auth,
+                RemoteAccess.DeviceName(context.Request.Headers.UserAgent.ToString()), ct);
+            return Results.NoContent();
+        }).WithInputErrors();
         push.MapPost("/unsubscribe", async (UnsubscribeInput input, NotificationService service, CurrentProfile profile,
             CancellationToken ct) =>
         {
@@ -73,12 +66,21 @@ public static class AutomationEndpoints
         });
 
         var tasks = app.MapGroup("/api/tasks");
-        tasks.MapGet("", async (AutomationService service, CancellationToken ct) =>
-            Results.Ok((await service.TasksAsync(ct)).Select(TaskView)));
+        tasks.MapGet("", async (AutomationService service, ChatDb db, CancellationToken ct) =>
+        {
+            // A task whose chat has a run going shows it, so "Run now" visibly does something.
+            var list = await service.TasksAsync(ct);
+            var chats = list.Select(t => t.ConversationId).OfType<int>().ToList();
+            var active = await db.Runs.AsNoTracking()
+                .Where(r => chats.Contains(r.ConversationId) && RunStatus.Active.Contains(r.Status))
+                .Select(r => new { r.ConversationId, r.Status }).ToListAsync(ct);
+            return Results.Ok(list.Select(t =>
+                TaskView(t, active.FirstOrDefault(a => a.ConversationId == t.ConversationId)?.Status)));
+        });
         tasks.MapPost("", (TaskInput input, AutomationService service, CancellationToken ct) =>
-            SaveTaskAsync(null, input, service, ct));
+            SaveTaskAsync(null, input, service, ct)).WithInputErrors();
         tasks.MapPut("/{id:int}", (int id, TaskInput input, AutomationService service, CancellationToken ct) =>
-            SaveTaskAsync(id, input, service, ct));
+            SaveTaskAsync(id, input, service, ct)).WithInputErrors();
         tasks.MapDelete("/{id:int}", async (int id, AutomationService service, CancellationToken ct) =>
             await service.DeleteTaskAsync(id, ct) ? Results.NoContent() : Results.NotFound());
         tasks.MapPost("/{id:int}/run", async (int id, ChatDb db, SchedulerService scheduler, CancellationToken ct) =>
@@ -104,17 +106,17 @@ public static class AutomationEndpoints
         });
         tasks.MapPost("/concert-radar", (AutomationService service, CancellationToken ct) =>
             SaveTaskAsync(null, new TaskInput("Konsertradar", AutomationService.ConcertRadarPrompt, "09:00", 1, null,
-                false, false, true), service, ct));
+                false, false, true), service, ct)).WithInputErrors();
         tasks.MapPost("/morning-brief", (AutomationService service, CancellationToken ct) =>
             SaveTaskAsync(null, new TaskInput("Morning brief", AutomationService.MorningBriefPrompt, "07:00", 31, null,
-                true, false, true), service, ct));
+                true, false, true), service, ct)).WithInputErrors();
 
         var watches = app.MapGroup("/api/watches");
         watches.MapGet("", (AutomationService service, CancellationToken ct) => service.WatchesAsync(ct));
         watches.MapPost("", (WatchInput input, AutomationService service, CancellationToken ct) =>
-            SaveWatchAsync(null, input, service, ct));
+            SaveWatchAsync(null, input, service, ct)).WithInputErrors();
         watches.MapPut("/{id:int}", (int id, WatchInput input, AutomationService service, CancellationToken ct) =>
-            SaveWatchAsync(id, input, service, ct));
+            SaveWatchAsync(id, input, service, ct)).WithInputErrors();
         watches.MapDelete("/{id:int}", async (int id, AutomationService service, CancellationToken ct) =>
             await service.DeleteWatchAsync(id, ct) ? Results.NoContent() : Results.NotFound());
         watches.MapPost("/{id:int}/check", async (int id, ChatDb db, WatchService watcher, CancellationToken ct) =>
@@ -136,18 +138,7 @@ public static class AutomationEndpoints
     {
         if (!string.IsNullOrEmpty(input.Secret) && !CanSendSecrets(context))
             return Results.BadRequest(new { error = "Add passwords on the computer or over HTTPS (Tailscale), not over plain Wi-Fi." });
-        try
-        {
-            return Results.Ok(await service.SaveAsync(id, input, ct));
-        }
-        catch (KeyNotFoundException)
-        {
-            return Results.NotFound();
-        }
-        catch (ArgumentException ex)
-        {
-            return Results.BadRequest(new { error = ex.Message });
-        }
+        return Results.Ok(await service.SaveAsync(id, input, ct));
     }
 
     private static async Task<IResult> TestAccountAsync(int id, ChatDb db, MailService mail, CalendarService calendar,
@@ -173,7 +164,8 @@ public static class AutomationEndpoints
         }
     }
 
-    private static object TaskView(ScheduledTask task) => new
+    // runStatus: queued, running or awaiting_approval while a run is going; otherwise null.
+    private static object TaskView(ScheduledTask task, string? runStatus = null) => new
     {
         task.Id,
         task.Name,
@@ -188,40 +180,15 @@ public static class AutomationEndpoints
         task.ConversationId,
         task.LastRunAt,
         schedule = $"{AutomationService.DescribeDays(task.Days)} at {task.Time}",
-        nextRun = task.Enabled ? AutomationService.NextRun(task, DateTime.Now) : null
+        nextRun = task.Enabled ? AutomationService.NextRun(task, DateTime.Now) : null,
+        runStatus
     };
 
     private static async Task<IResult> SaveTaskAsync(int? id, TaskInput input, AutomationService service,
-        CancellationToken ct)
-    {
-        try
-        {
-            return Results.Ok(TaskView(await service.SaveTaskAsync(id, input, ct)));
-        }
-        catch (KeyNotFoundException)
-        {
-            return Results.NotFound();
-        }
-        catch (ArgumentException ex)
-        {
-            return Results.BadRequest(new { error = ex.Message });
-        }
-    }
+        CancellationToken ct) =>
+        Results.Ok(TaskView(await service.SaveTaskAsync(id, input, ct)));
 
     private static async Task<IResult> SaveWatchAsync(int? id, WatchInput input, AutomationService service,
-        CancellationToken ct)
-    {
-        try
-        {
-            return Results.Ok(await service.SaveWatchAsync(id, input, ct));
-        }
-        catch (KeyNotFoundException)
-        {
-            return Results.NotFound();
-        }
-        catch (ArgumentException ex)
-        {
-            return Results.BadRequest(new { error = ex.Message });
-        }
-    }
+        CancellationToken ct) =>
+        Results.Ok(await service.SaveWatchAsync(id, input, ct));
 }

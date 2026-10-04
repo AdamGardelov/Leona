@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   api,
+  ApiError,
   readStorage,
   send,
   writeStorage,
@@ -15,8 +16,9 @@ import {
   type Source,
   type StepStatus,
   parseArguments,
+  errorText,
 } from './api';
-import { Icon, Mark, PanelToggle } from './icons';
+import { Icon, Mark, PanelToggle, type IconName } from './icons';
 import { rememberedRun, useRun } from './useRun';
 import { useDrawerGestures } from './drawer';
 import { canRecord, canSpeak, speak, speechAvailable, stopSpeaking, unlockSpeech } from './voice';
@@ -62,14 +64,67 @@ type Queued = {
   attachments: AttachmentRef[];
 };
 
-type ComposerPreferences = {
-  model: string;
-  web: boolean;
-  files: boolean;
-  think: boolean;
-  commands: boolean;
-  accounts: boolean;
-};
+// The tool switches a message is sent with; the keys are those of the run input.
+type Tools = { web: boolean; files: boolean; commands: boolean; accounts: boolean; think: boolean };
+
+function toolsOf(source: Partial<Tools>): Tools {
+  return {
+    web: !!source.web,
+    files: !!source.files,
+    commands: !!source.commands,
+    accounts: !!source.accounts,
+    think: !!source.think,
+  };
+}
+
+// The switches by the message box, in order. File and terminal tools work on the computer owner's
+// files, so other profiles do not get them.
+const toolSwitches: {
+  key: keyof Tools;
+  label: string;
+  icon: IconName;
+  hint: string;
+  needs: 'tools' | 'thinking';
+  ownerOnly?: boolean;
+}[] = [
+  {
+    key: 'web',
+    label: 'Web',
+    icon: 'globe',
+    needs: 'tools',
+    hint: 'Search and read public webpages',
+  },
+  {
+    key: 'files',
+    label: 'Files',
+    icon: 'file',
+    needs: 'tools',
+    ownerOnly: true,
+    hint: 'Search, read and edit files in the workspace and your added folders; changes need approval',
+  },
+  {
+    key: 'commands',
+    label: 'Terminal',
+    icon: 'terminal',
+    needs: 'tools',
+    ownerOnly: true,
+    hint: 'Let Leona propose shell commands; each one needs your approval',
+  },
+  {
+    key: 'accounts',
+    label: 'Personal',
+    icon: 'user',
+    needs: 'tools',
+    hint: 'Mail, calendars, home, expenses and schedules; sending and changes need your approval',
+  },
+  {
+    key: 'think',
+    label: 'Thinking',
+    icon: 'bulb',
+    needs: 'thinking',
+    hint: 'Let the model reason before answering',
+  },
+];
 type HistoryMessage = Omit<Message, 'tools'> & {
   tools?: {
     name: string;
@@ -122,13 +177,9 @@ export function App({ session }: { session: Session }) {
   const toggleRight = () => setPanels((p) => ({ ...p, right: !p.right }));
 
   const [preferences] = useState(() =>
-    readStorage<ComposerPreferences>('leona-composer', {
+    readStorage<Tools & { model: string }>('leona-composer', {
       model: '',
-      web: true,
-      files: false,
-      think: false,
-      commands: false,
-      accounts: false,
+      ...toolsOf({ web: true }),
     }),
   );
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -139,11 +190,7 @@ export function App({ session }: { session: Session }) {
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState(preferences.model);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
-  const [web, setWeb] = useState(preferences.web);
-  const [files, setFiles] = useState(preferences.files);
-  const [think, setThink] = useState(preferences.think);
-  const [commands, setCommands] = useState(preferences.commands);
-  const [personal, setPersonal] = useState(preferences.accounts);
+  const [tools, setTools] = useState(() => toolsOf(preferences));
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [sheet, setSheet] = useState(false);
@@ -160,7 +207,6 @@ export function App({ session }: { session: Session }) {
   const selectionVersion = useRef(0);
   // The chat follows a growing answer only while you are at the bottom; scroll up to read in peace.
   const chat = useRef<HTMLElement>(null);
-  const following = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
   // Messages written while Leona answers wait here and are sent, in order, when she is done.
   const [queue, setQueue] = useState<Queued[]>([]);
@@ -172,11 +218,7 @@ export function App({ session }: { session: Session }) {
     onStart: (started: AgentRun) => {
       setId(started.conversationId);
       setModel(started.input.model);
-      setWeb(started.input.web);
-      setFiles(started.input.files);
-      setThink(started.input.think);
-      setCommands(started.input.commands ?? false);
-      setPersonal(started.input.accounts ?? false);
+      setTools(toolsOf(started.input));
     },
     onFinished: (_, saved) => {
       if (saved) {
@@ -190,11 +232,10 @@ export function App({ session }: { session: Session }) {
   const supportsTools = capabilities?.tools ?? false;
   const supportsThinking = capabilities?.thinking ?? false;
 
-  useEffect(
-    () =>
-      writeStorage('leona-composer', { model, web, files, think, commands, accounts: personal }),
-    [model, web, files, think, commands, personal],
-  );
+  useEffect(() => writeStorage('leona-composer', { model, ...tools }), [model, tools]);
+  // A switch only counts when the model supports it and the profile may use it.
+  const allowed = (t: (typeof toolSwitches)[number]) =>
+    (t.needs === 'thinking' ? supportsThinking : supportsTools) && (owner || !t.ownerOnly);
 
   async function refresh() {
     const [active, stored] = await Promise.all([
@@ -314,7 +355,7 @@ export function App({ session }: { session: Session }) {
         }
       } catch (e) {
         if (mounted) {
-          setError(String(e));
+          setError(errorText(e));
           run.setBusy(false);
         }
       }
@@ -327,7 +368,7 @@ export function App({ session }: { session: Session }) {
 
   useEffect(() => {
     const element = chat.current;
-    if (element && following.current) {
+    if (element && atBottom) {
       element.scrollTop = element.scrollHeight;
     }
   }, [messages]);
@@ -340,13 +381,10 @@ export function App({ session }: { session: Session }) {
     if (!element) {
       return;
     }
-    const near = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
-    following.current = near;
-    setAtBottom(near);
+    setAtBottom(element.scrollHeight - element.scrollTop - element.clientHeight < 80);
   }
 
   function toBottom(smooth: boolean) {
-    following.current = true;
     setAtBottom(true);
     chat.current?.scrollTo({
       top: chat.current.scrollHeight,
@@ -501,7 +539,7 @@ export function App({ session }: { session: Session }) {
       run.setLastRunId(runs[0]?.id ?? null);
       markRead(next);
     } catch (e) {
-      setError(String(e));
+      setError(errorText(e));
     }
   }
 
@@ -573,7 +611,7 @@ export function App({ session }: { session: Session }) {
         setShowArchived(false);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   }
 
@@ -592,21 +630,19 @@ export function App({ session }: { session: Session }) {
     setDeleting(true);
     setError('');
     try {
-      const response = await fetch(`/api/conversations/${conversation.id}`, { method: 'DELETE' });
-      if (!response.ok && response.status !== 404) {
-        throw new Error(
-          response.status === 409
-            ? 'Stop the current run before deleting this conversation.'
-            : 'Could not delete the conversation. Please try again.',
-        );
-      }
+      await send(`/conversations/${conversation.id}`, 'DELETE').catch((e) => {
+        // A conversation that is already gone is fine.
+        if (!(e instanceof ApiError && e.status === 404)) {
+          throw e;
+        }
+      });
       await refresh();
       if (id === conversation.id) {
         newConversation();
         setText('');
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setDeleting(false);
     }
@@ -684,11 +720,7 @@ export function App({ session }: { session: Session }) {
         input: {
           text: prompt.trim(),
           model,
-          think: think && supportsThinking,
-          web: web && supportsTools,
-          files: files && owner && supportsTools,
-          commands: commands && owner && supportsTools,
-          accounts: personal && supportsTools,
+          ...Object.fromEntries(toolSwitches.map((t) => [t.key, tools[t.key] && allowed(t)])),
           attachments: attached,
         },
       });
@@ -700,7 +732,7 @@ export function App({ session }: { session: Session }) {
       await run.watch(created);
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
       run.setBusy(false);
     }
   }
@@ -722,52 +754,16 @@ export function App({ session }: { session: Session }) {
   const title = id
     ? ([...conversations, ...archived].find((c) => c.id === id)?.title ?? 'Conversation')
     : 'New conversation';
-  const allToggles: Toggle[] = [
-    {
-      label: 'Web',
-      icon: 'globe',
-      on: web,
-      set: setWeb,
-      supported: supportsTools,
-      hint: 'Search and read public webpages',
-    },
-    {
-      label: 'Files',
-      icon: 'file',
-      on: files,
-      set: setFiles,
-      supported: supportsTools,
-      hint: 'Search, read and edit files in the workspace and your added folders; changes need approval',
-    },
-    {
-      label: 'Terminal',
-      icon: 'terminal',
-      on: commands,
-      set: setCommands,
-      supported: supportsTools,
-      hint: 'Let Leona propose shell commands; each one needs your approval',
-    },
-    {
-      label: 'Personal',
-      icon: 'user',
-      on: personal,
-      set: setPersonal,
-      supported: supportsTools,
-      hint: 'Mail, calendars, home, expenses and schedules; sending and changes need your approval',
-    },
-    {
-      label: 'Thinking',
-      icon: 'bulb',
-      on: think,
-      set: setThink,
-      supported: supportsThinking,
-      hint: 'Let the model reason before answering',
-    },
-  ];
-  // File and terminal tools work on the computer owner's files, so other profiles do not get them.
-  const toggles = allToggles.filter(
-    (t) => owner || (t.label !== 'Files' && t.label !== 'Terminal'),
-  );
+  const toggles: Toggle[] = toolSwitches
+    .filter((t) => owner || !t.ownerOnly)
+    .map((t) => ({
+      label: t.label,
+      icon: t.icon,
+      hint: t.hint,
+      on: tools[t.key],
+      set: (on: boolean) => setTools((previous) => ({ ...previous, [t.key]: on })),
+      supported: t.needs === 'thinking' ? supportsThinking : supportsTools,
+    }));
   const currentStatus = run.timeline[run.timeline.length - 1]?.text;
   const ready = attachments.filter((a) => a.status === 'ready' && a.ref).map((a) => a.ref!);
   const uploading = attachments.some((a) => a.status === 'uploading');

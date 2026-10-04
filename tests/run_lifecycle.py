@@ -155,6 +155,12 @@ with tempfile.TemporaryDirectory(prefix='leona-lifecycle-') as temp:
         check(request('/tasks/'+str(task['id'])+'/run','POST')[0]==202,'a task can run now')
         eventually(lambda: any(n['title']=='Evening check' for n in request('/notifications')[1]['items']))
         check(request('/notifications')[1]['unread']>=1,'a finished task notifies with its answer')
+        # A task whose run waits for approval shows it in the list, so "Run now" visibly does something.
+        status,needs=request('/tasks','POST',{'name':'Needs approval','prompt':'Create runnow.md','time':'21:00','days':31,'model':'fake','web':False,'files':True,'accounts':False})
+        def task_view(t): return next(x for x in request('/tasks')[1] if x['id']==t['id'])
+        check(request('/tasks/'+str(needs['id'])+'/run','POST')[0]==202 and eventually(lambda: task_view(needs)['runStatus']=='awaiting_approval') and task_view(task)['runStatus'] is None,'the task list shows which tasks have a run going')
+        waiting_run=request('/conversations/'+str(task_view(needs)['conversationId'])+'/runs')[1][0]
+        request('/runs/'+waiting_run['id']+'/cancel','POST'); wait(waiting_run,'cancelled')
         check(request('/watches','POST',{'url':'ftp://example.com','find':'Price'})[0]==400 and request('/watches','POST',{'url':'https://example.com','find':'Price','below':100,'intervalMinutes':60})[0]==200,'watches are validated and saved')
         check(len(request('/push/key')[1]['publicKey'])==87,'a push key is available for subscriptions')
         check(state(r)=='awaiting_approval','another conversation completes while first awaits approval')

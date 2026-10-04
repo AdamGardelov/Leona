@@ -131,31 +131,31 @@ public sealed partial class CareerBoards(IHttpClientFactory clients, IConfigurat
         var ads = new Dictionary<string, JobService.JobAd>();
         var site = new Uri(board.Feed);
         var publicSite = $"https://{site.Host}/{site.AbsolutePath.Split('/').Last()}";
-        foreach (var query in queries.Take(10))
+        foreach (var body in await Task.WhenAll(queries.Take(10).Select(query => WorkdayPageAsync(board, query, 20, ct))))
         {
-            using var page = JsonDocument.Parse(await WorkdayPageAsync(board, query, 20, ct));
+            using var page = JsonDocument.Parse(body);
             foreach (var job in page.RootElement.GetProperty("jobPostings").EnumerateArray())
             {
-                var path = Get(job, "externalPath");
-                var place = Get(job, "locationsText");
+                var path = JsonPath.Text(job, "externalPath");
+                var place = JsonPath.Text(job, "locationsText");
                 // "2 Locations": the job's own page names them.
                 if (Regex.IsMatch(place, @"^\d+ (Locations|Platser)", RegexOptions.IgnoreCase))
                 {
                     using var detail = JsonDocument.Parse(await clients.CreateClient("jobs").GetStringAsync(board.Feed + path, ct));
                     var info = detail.RootElement.GetProperty("jobPostingInfo");
-                    place = string.Join(", ", new[] { Get(info, "location") }.Concat(
+                    place = string.Join(", ", new[] { JsonPath.Text(info, "location") }.Concat(
                         info.TryGetProperty("additionalLocations", out var more) && more.ValueKind == JsonValueKind.Array
                             ? more.EnumerateArray().Select(l => l.GetString() ?? "")
                             : []).Where(l => l.Length > 0));
                 }
 
-                var title = Get(job, "title");
+                var title = JsonPath.Text(job, "title");
                 if (path.Length == 0 || ads.ContainsKey(path) || !InRegion(place))
                     continue;
                 var titleMatch = queries.Any(q => title.Contains(q, StringComparison.OrdinalIgnoreCase));
                 if (!titleMatch && !DeveloperTitle().IsMatch(title))
                     continue;
-                ads[path] = new JobService.JobAd(publicSite + path, title, board.Name, place, PostedOn(Get(job, "postedOn")), null,
+                ads[path] = new JobService.JobAd(publicSite + path, title, board.Name, place, PostedOn(JsonPath.Text(job, "postedOn")), null,
                     publicSite + path, null, "", JobService.IsAgency(board.Name), titleMatch, Source: "career page");
             }
         }
@@ -207,8 +207,8 @@ public sealed partial class CareerBoards(IHttpClientFactory clients, IConfigurat
                         .Where(p => !string.IsNullOrWhiteSpace(p)));
                     yield return new Posting(item.Element("title")?.Value ?? "", item.Element("link")?.Value ?? "",
                         remote ? $"Remote{(place.Length > 0 ? ", " + place : "")}" : place,
-                        DateTime.TryParse(item.Element("pubDate")?.Value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date) ? date : null,
-                        MailService.HtmlToText(item.Element("description")?.Value ?? ""));
+                        JsonPath.Date(item.Element("pubDate")?.Value),
+                        PageTextExtractor.HtmlToText(item.Element("description")?.Value ?? ""));
                 }
                 yield break;
             case "varbi":
@@ -219,67 +219,56 @@ public sealed partial class CareerBoards(IHttpClientFactory clients, IConfigurat
                     var town = s_region.FirstOrDefault(r => text.Contains(r, StringComparison.OrdinalIgnoreCase));
                     yield return new Posting(item.Element("title")?.Value ?? "", item.Element("link")?.Value ?? "",
                         town is null ? "" : CultureInfo.InvariantCulture.TextInfo.ToTitleCase(town),
-                        DateTime.TryParse(item.Element("pubDate")?.Value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date) ? date : null,
-                        MailService.HtmlToText(text));
+                        JsonPath.Date(item.Element("pubDate")?.Value),
+                        PageTextExtractor.HtmlToText(text));
                 }
                 yield break;
             case "lever":
                 foreach (var job in JsonDocument.Parse(body).RootElement.EnumerateArray())
-                    yield return new Posting(Get(job, "text"), Get(job, "hostedUrl"),
-                        Get(job, "categories", "location") + (Get(job, "workplaceType") == "remote" ? ", Remote" : ""),
+                    yield return new Posting(JsonPath.Text(job, "text"), JsonPath.Text(job, "hostedUrl"),
+                        JsonPath.Text(job, "categories", "location") + (JsonPath.Text(job, "workplaceType") == "remote" ? ", Remote" : ""),
                         job.TryGetProperty("createdAt", out var created) && created.TryGetInt64(out var ms)
                             ? DateTimeOffset.FromUnixTimeMilliseconds(ms).LocalDateTime : null,
-                        Get(job, "descriptionPlain"));
+                        JsonPath.Text(job, "descriptionPlain"));
                 yield break;
             case "greenhouse":
                 foreach (var job in JsonDocument.Parse(body).RootElement.GetProperty("jobs").EnumerateArray())
-                    yield return new Posting(Get(job, "title"), Get(job, "absolute_url"), Get(job, "location", "name"),
-                        DateTime.TryParse(Get(job, "updated_at"), out var updated) ? updated : null,
-                        MailService.HtmlToText(WebUtility.HtmlDecode(Get(job, "content"))));
+                    yield return new Posting(JsonPath.Text(job, "title"), JsonPath.Text(job, "absolute_url"), JsonPath.Text(job, "location", "name"),
+                        JsonPath.Date(JsonPath.Text(job, "updated_at")),
+                        PageTextExtractor.HtmlToText(WebUtility.HtmlDecode(JsonPath.Text(job, "content"))));
                 yield break;
             case "ashby":
                 foreach (var job in JsonDocument.Parse(body).RootElement.GetProperty("jobs").EnumerateArray())
-                    yield return new Posting(Get(job, "title"), Get(job, "jobUrl"),
-                        Get(job, "location") + (job.TryGetProperty("isRemote", out var r) && r.ValueKind == JsonValueKind.True ? ", Remote" : ""),
-                        DateTime.TryParse(Get(job, "publishedAt"), out var published) ? published : null,
-                        Get(job, "descriptionPlain"));
+                    yield return new Posting(JsonPath.Text(job, "title"), JsonPath.Text(job, "jobUrl"),
+                        JsonPath.Text(job, "location") + (job.TryGetProperty("isRemote", out var r) && r.ValueKind == JsonValueKind.True ? ", Remote" : ""),
+                        JsonPath.Date(JsonPath.Text(job, "publishedAt")),
+                        JsonPath.Text(job, "descriptionPlain"));
                 yield break;
             case "workable":
                 foreach (var job in JsonDocument.Parse(body).RootElement.GetProperty("jobs").EnumerateArray())
-                    yield return new Posting(Get(job, "title"), Get(job, "url"),
-                        string.Join(", ", new[] { Get(job, "city"), Get(job, "country") }.Where(p => p.Length > 0)) +
+                    yield return new Posting(JsonPath.Text(job, "title"), JsonPath.Text(job, "url"),
+                        string.Join(", ", new[] { JsonPath.Text(job, "city"), JsonPath.Text(job, "country") }.Where(p => p.Length > 0)) +
                         (job.TryGetProperty("telecommuting", out var t) && t.ValueKind == JsonValueKind.True ? ", Remote" : ""),
-                        DateTime.TryParse(Get(job, "published_on"), out var on) ? on : null, Get(job, "description"));
+                        JsonPath.Date(JsonPath.Text(job, "published_on")), JsonPath.Text(job, "description"));
                 yield break;
             case "recruitee":
                 foreach (var job in JsonDocument.Parse(body).RootElement.GetProperty("offers").EnumerateArray())
-                    yield return new Posting(Get(job, "title"), Get(job, "careers_url"),
-                        string.Join(", ", new[] { Get(job, "city"), Get(job, "country") }.Where(p => p.Length > 0)) +
+                    yield return new Posting(JsonPath.Text(job, "title"), JsonPath.Text(job, "careers_url"),
+                        string.Join(", ", new[] { JsonPath.Text(job, "city"), JsonPath.Text(job, "country") }.Where(p => p.Length > 0)) +
                         (job.TryGetProperty("remote", out var rem) && rem.ValueKind == JsonValueKind.True ? ", Remote" : ""),
-                        DateTime.TryParse(Get(job, "published_at"), out var at) ? at : null,
-                        MailService.HtmlToText(Get(job, "description")));
+                        JsonPath.Date(JsonPath.Text(job, "published_at")),
+                        PageTextExtractor.HtmlToText(JsonPath.Text(job, "description")));
                 yield break;
             case "smartrecruiters":
                 foreach (var job in JsonDocument.Parse(body).RootElement.GetProperty("content").EnumerateArray())
-                    yield return new Posting(Get(job, "name"),
-                        $"https://jobs.smartrecruiters.com/{Get(job, "company", "identifier")}/{Get(job, "id")}",
-                        string.Join(", ", new[] { Get(job, "location", "city"), Get(job, "location", "country") }.Where(p => p.Length > 0)) +
+                    yield return new Posting(JsonPath.Text(job, "name"),
+                        $"https://jobs.smartrecruiters.com/{JsonPath.Text(job, "company", "identifier")}/{JsonPath.Text(job, "id")}",
+                        string.Join(", ", new[] { JsonPath.Text(job, "location", "city"), JsonPath.Text(job, "location", "country") }.Where(p => p.Length > 0)) +
                         (job.TryGetProperty("location", out var loc) && loc.TryGetProperty("remote", out var rm) &&
                          rm.ValueKind == JsonValueKind.True ? ", Remote" : ""),
-                        DateTime.TryParse(Get(job, "releasedDate"), out var released) ? released : null, "");
+                        JsonPath.Date(JsonPath.Text(job, "releasedDate")), "");
                 yield break;
         }
-    }
-
-    private static string Get(JsonElement element, params string[] path)
-    {
-        foreach (var name in path)
-        {
-            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(name, out element))
-                return "";
-        }
-
-        return element.ValueKind == JsonValueKind.String ? element.GetString() ?? "" : "";
     }
 
     // The Göteborg region, or remote work from Sweden.
@@ -299,42 +288,41 @@ public sealed partial class CareerBoards(IHttpClientFactory clients, IConfigurat
             return [];
 
         var client = clients.CreateClient("search");
-        var boards = new Dictionary<string, Board>();
-        foreach (var query in queries.Take(3))
-        {
-            foreach (var site in new[] { "teamtailor.com", "jobs.lever.co", "boards.greenhouse.io" })
+        // The searches run together; their results are taken in order, so the same boards are picked as one by one.
+        var searches = queries.Take(3)
+            .SelectMany(query => new[] { "teamtailor.com", "jobs.lever.co", "boards.greenhouse.io" }
+                .Select(site => $"site:{site} {query} Göteborg"))
+            .Select(async search =>
             {
                 try
                 {
-                    var json = await client.GetStringAsync(
-                        $"{searx.TrimEnd('/')}/search?q={Uri.EscapeDataString($"site:{site} {query} Göteborg")}&format=json", ct);
-                    using var doc = JsonDocument.Parse(json);
-                    foreach (var result in doc.RootElement.GetProperty("results").EnumerateArray())
-                    {
-                        if (Uri.TryCreate(result.GetProperty("url").GetString(), UriKind.Absolute, out var url) &&
-                            FromAddress(url) is { } board && !known.Contains(board.Feed) && boards.Count < 8)
-                            boards.TryAdd(board.Feed, board);
-                    }
+                    return await Searx.SearchAsync(client, searx, search, ct);
                 }
                 catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException && !ct.IsCancellationRequested)
                 {
+                    return [];
                 }
-            }
+            });
+        var boards = new Dictionary<string, Board>();
+        foreach (var hit in (await Task.WhenAll(searches)).SelectMany(hits => hits))
+        {
+            if (Uri.TryCreate(hit.Url, UriKind.Absolute, out var url) && FromAddress(url) is { } board &&
+                !known.Contains(board.Feed) && boards.Count < 8)
+                boards.TryAdd(board.Feed, board);
         }
 
-        var named = new List<Board>();
-        foreach (var board in boards.Values)
+        var named = await Task.WhenAll(boards.Values.Select(async board =>
         {
             try
             {
-                named.Add(await NamedAsync(board, ct));
+                return await NamedAsync(board, ct);
             }
             catch (Exception ex) when (ex is HttpRequestException or JsonException or System.Xml.XmlException or TaskCanceledException && !ct.IsCancellationRequested)
             {
+                return null;
             }
-        }
-
-        return named;
+        }));
+        return named.OfType<Board>().ToList();
     }
 
     [GeneratedRegex(@"(?:https?://)?(?:jobs\.lever\.co/[\w-]+|(?:job-)?boards\.greenhouse\.io/(?:embed/job_board\?for=)?[\w-]+|jobs\.ashbyhq\.com/[\w-]+|apply\.workable\.com/[\w-]+|[\w-]+\.recruitee\.com|(?:careers|jobs)\.smartrecruiters\.com/[\w-]+)", RegexOptions.IgnoreCase)]

@@ -220,8 +220,7 @@ public class CalendarService(AccountService accounts, IHttpClientFactory clients
     // moved copy, if that occurrence had been moved). Everything else in the object is kept as it was.
     public static string ExcludeOccurrence(string ics, string exDate, string? overrideValue)
     {
-        var lines = Regex.Replace(ics, @"\r?\n[ \t]", "").Split('\n').Select(l => l.TrimEnd('\r'))
-            .Where(l => l.Length > 0);
+        var lines = Unfold(ics);
         var output = new List<string>();
         List<string>? block = null;
         var series = false;
@@ -275,8 +274,7 @@ public class CalendarService(AccountService accounts, IHttpClientFactory clients
     // the series stays) or, for the title, place and notes, the whole series. Other lines are kept as they were.
     public static string EditEvent(string ics, Occurrence occurrence, Change change, bool wholeSeries)
     {
-        var lines = Regex.Replace(ics, @"\r?\n[ \t]", "").Split('\n').Select(l => l.TrimEnd('\r'))
-            .Where(l => l.Length > 0).ToList();
+        var lines = Unfold(ics).ToList();
         var blocks = new List<(int Start, int End)>();
         for (var i = 0; i < lines.Count; i++)
         {
@@ -288,8 +286,7 @@ public class CalendarService(AccountService accounts, IHttpClientFactory clients
         }
 
         string? Value(int start, int end, string name) => lines.Skip(start).Take(end - start)
-            .FirstOrDefault(l => l.StartsWith(name + ":", StringComparison.OrdinalIgnoreCase) ||
-                                 l.StartsWith(name + ";", StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(l => IsProperty(l, name));
         bool Series((int Start, int End) b) => Value(b.Start, b.End, "RECURRENCE-ID") is null &&
                                                (Value(b.Start, b.End, "RRULE") is not null || Value(b.Start, b.End, "RDATE") is not null);
         var master = blocks.FirstOrDefault(b => Value(b.Start, b.End, "RECURRENCE-ID") is null);
@@ -320,8 +317,7 @@ public class CalendarService(AccountService accounts, IHttpClientFactory clients
             // A new copy of the series for just this occurrence, placed after the series.
             string[] seriesOnly = ["DTSTART", "DTEND", "DURATION", "RRULE", "RDATE", "EXDATE", "RECURRENCE-ID"];
             block = lines.GetRange(master.Start, master.End - master.Start + 1)
-                .Where(l => !seriesOnly.Any(p => l.StartsWith(p + ":", StringComparison.OrdinalIgnoreCase) ||
-                                                 l.StartsWith(p + ";", StringComparison.OrdinalIgnoreCase)))
+                .Where(l => !seriesOnly.Any(p => IsProperty(l, p)))
                 .ToList();
             block.Insert(block.Count - 1, "RECURRENCE-ID" + occurrence.ExDate["EXDATE".Length..]);
             var e = occurrence.Event;
@@ -333,8 +329,7 @@ public class CalendarService(AccountService accounts, IHttpClientFactory clients
         {
             if (value is null)
                 return;
-            block.RemoveAll(l => l.StartsWith(name + ":", StringComparison.OrdinalIgnoreCase) ||
-                                 l.StartsWith(name + ";", StringComparison.OrdinalIgnoreCase));
+            block.RemoveAll(l => IsProperty(l, name));
             if (value.Length > 0)
                 block.Insert(block.Count - 1, $"{name}:{Escape(value)}");
         }
@@ -349,8 +344,7 @@ public class CalendarService(AccountService accounts, IHttpClientFactory clients
             var end = change.End ?? start + (e.End - e.Start);
             if (end <= start && !change.AllDay)
                 throw new ArgumentException("The end must be after the start.");
-            block.RemoveAll(l => new[] { "DTSTART", "DTEND", "DURATION" }.Any(p =>
-                l.StartsWith(p + ":", StringComparison.OrdinalIgnoreCase) || l.StartsWith(p + ";", StringComparison.OrdinalIgnoreCase)));
+            block.RemoveAll(l => new[] { "DTSTART", "DTEND", "DURATION" }.Any(p => IsProperty(l, p)));
             block.InsertRange(block.Count - 1, Times(start, end, change.AllDay));
         }
 
@@ -374,34 +368,10 @@ public class CalendarService(AccountService accounts, IHttpClientFactory clients
     public async Task<string> UpdateAsync(Account account, Located target, Change change, bool wholeSeries,
         CancellationToken ct)
     {
-        if (!target.Calendar.Writable || target.Url is null)
-            throw new ArgumentException($"{target.Calendar.Name} is a read-only calendar link; change the event in your calendar app.");
-
-        void Match(HttpRequestMessage request)
-        {
-            if (target.ETag is not null)
-                request.Headers.TryAddWithoutValidation("If-Match", target.ETag);
-        }
-
-        string current;
-        using (var response = await SendAsync(account, HttpMethod.Get, target.Url, null, null, ct, Match))
-        {
-            if (!response.IsSuccessStatusCode)
-                throw new ArgumentException(response.StatusCode == HttpStatusCode.PreconditionFailed
-                    ? "The event changed in the calendar since it was looked up. Nothing was changed; look it up again."
-                    : $"{target.Calendar.Name}: the event could not be read ({(int)response.StatusCode}).");
-            current = await response.Content.ReadAsStringAsync(ct);
-        }
-
-        var updated = EditEvent(current, target.Occurrence, change, wholeSeries);
-        using (var response = await SendAsync(account, HttpMethod.Put, target.Url, updated, null, ct, Match))
-        {
-            if (response.StatusCode == HttpStatusCode.PreconditionFailed)
-                throw new ArgumentException("The event changed in the calendar since it was looked up. Nothing was changed; look it up again.");
-            if (!response.IsSuccessStatusCode)
-                throw new ArgumentException($"{target.Calendar.Name}: the event was not changed ({(int)response.StatusCode}).");
-        }
-
+        RequireWritable(target, "change");
+        var current = await ReadForChangeAsync(account, target, "changed", ct);
+        await WriteAsync(account, target, HttpMethod.Put, EditEvent(current, target.Occurrence, change, wholeSeries),
+            "changed", ct);
         return $"Changed \"{target.Occurrence.Event.Title}\" in {target.Calendar.Name} ({account.Label}).";
     }
 
@@ -410,42 +380,54 @@ public class CalendarService(AccountService accounts, IHttpClientFactory clients
     public async Task<string> DeleteAsync(Account account, Located target, bool wholeSeries, CancellationToken ct)
     {
         var e = target.Occurrence.Event;
-        if (!target.Calendar.Writable || target.Url is null)
-            throw new ArgumentException($"{target.Calendar.Name} is a read-only calendar link; delete the event in your calendar app.");
-
-        void Match(HttpRequestMessage request)
-        {
-            if (target.ETag is not null)
-                request.Headers.TryAddWithoutValidation("If-Match", target.ETag);
-        }
-
-        HttpResponseMessage response;
+        RequireWritable(target, "delete");
         if (target.Occurrence.Recurring && !wholeSeries)
         {
-            using var current = await SendAsync(account, HttpMethod.Get, target.Url, null, null, ct, Match);
-            if (!current.IsSuccessStatusCode)
-                throw new ArgumentException(current.StatusCode == HttpStatusCode.PreconditionFailed
-                    ? "The event changed in the calendar since it was looked up. Nothing was deleted; look it up again."
-                    : $"{target.Calendar.Name}: the event could not be read ({(int)current.StatusCode}).");
-            var updated = ExcludeOccurrence(await current.Content.ReadAsStringAsync(ct), target.Occurrence.ExDate,
-                target.Occurrence.OverrideValue);
-            response = await SendAsync(account, HttpMethod.Put, target.Url, updated, null, ct, Match);
+            var current = await ReadForChangeAsync(account, target, "deleted", ct);
+            await WriteAsync(account, target, HttpMethod.Put,
+                ExcludeOccurrence(current, target.Occurrence.ExDate, target.Occurrence.OverrideValue), "deleted", ct);
         }
         else
-        {
-            response = await SendAsync(account, HttpMethod.Delete, target.Url, null, null, ct, Match);
-        }
-
-        using (response)
-        {
-            if (response.StatusCode == HttpStatusCode.PreconditionFailed)
-                throw new ArgumentException("The event changed in the calendar since it was looked up. Nothing was deleted; look it up again.");
-            if (!response.IsSuccessStatusCode)
-                throw new ArgumentException($"{target.Calendar.Name}: the event was not deleted ({(int)response.StatusCode}).");
-        }
+            await WriteAsync(account, target, HttpMethod.Delete, null, "deleted", ct);
 
         var what = target.Occurrence.Recurring ? wholeSeries ? "every occurrence of " : "this occurrence of " : "";
         return $"Deleted {what}\"{e.Title}\" ({e.Start:ddd yyyy-MM-dd HH:mm}) from {target.Calendar.Name} ({account.Label}).";
+    }
+
+    private static void RequireWritable(Located target, string verb)
+    {
+        if (!target.Calendar.Writable || target.Url is null)
+            throw new ArgumentException($"{target.Calendar.Name} is a read-only calendar link; {verb} the event in your calendar app.");
+    }
+
+    // Reads and writes carry the ETag the event was found with, so the server refuses if it changed since.
+    private static void IfMatch(HttpRequestMessage request, Located target)
+    {
+        if (target.ETag is not null)
+            request.Headers.TryAddWithoutValidation("If-Match", target.ETag);
+    }
+
+    private static string ChangedElsewhere(string done) =>
+        $"The event changed in the calendar since it was looked up. Nothing was {done}; look it up again.";
+
+    private async Task<string> ReadForChangeAsync(Account account, Located target, string done, CancellationToken ct)
+    {
+        using var response = await SendAsync(account, HttpMethod.Get, target.Url!, null, null, ct, r => IfMatch(r, target));
+        if (!response.IsSuccessStatusCode)
+            throw new ArgumentException(response.StatusCode == HttpStatusCode.PreconditionFailed
+                ? ChangedElsewhere(done)
+                : $"{target.Calendar.Name}: the event could not be read ({(int)response.StatusCode}).");
+        return await response.Content.ReadAsStringAsync(ct);
+    }
+
+    private async Task WriteAsync(Account account, Located target, HttpMethod method, string? body, string done,
+        CancellationToken ct)
+    {
+        using var response = await SendAsync(account, method, target.Url!, body, null, ct, r => IfMatch(r, target));
+        if (response.StatusCode == HttpStatusCode.PreconditionFailed)
+            throw new ArgumentException(ChangedElsewhere(done));
+        if (!response.IsSuccessStatusCode)
+            throw new ArgumentException($"{target.Calendar.Name}: the event was not {done} ({(int)response.StatusCode}).");
     }
 
     public static string Format(IEnumerable<EventInfo> events)
@@ -461,12 +443,8 @@ public class CalendarService(AccountService accounts, IHttpClientFactory clients
 
     public static NewEvent ParseEvent(string title, string start, string end, string? location, string? notes)
     {
-        static DateTime Local(string value, string name) =>
-            DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var parsed)
-                ? parsed
-                : throw new ArgumentException($"Invalid {name}. Use a local date and time like 2026-10-02T14:00.");
-        var startLocal = Local(start, "start");
-        var endLocal = Local(end, "end");
+        var startLocal = ParseLocal(start, "start", "a local date and time like 2026-10-02T14:00");
+        var endLocal = ParseLocal(end, "end", "a local date and time like 2026-10-02T14:00");
         if (endLocal <= startLocal)
             throw new ArgumentException("The end must be after the start.");
         if (string.IsNullOrWhiteSpace(title))
@@ -484,6 +462,20 @@ public class CalendarService(AccountService accounts, IHttpClientFactory clients
             : writable.FirstOrDefault(c => c.Name.Equals(calendarName, StringComparison.OrdinalIgnoreCase)) ??
               throw new ArgumentException($"No calendar named \"{calendarName}\". Calendars: {string.Join(", ", writable.Select(c => c.Name))}.");
     }
+
+    public static DateTime ParseLocal(string value, string name, string example) =>
+        DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var parsed)
+            ? parsed
+            : throw new ArgumentException($"Invalid {name}. Use {example}.");
+
+    // iCalendar continues long lines on the next line after a space; joined back, one property per line.
+    private static IEnumerable<string> Unfold(string ics) =>
+        Regex.Replace(ics, @"\r?\n[ \t]", "").Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0);
+
+    // "DTSTART:…" and "DTSTART;TZID=…:…" are both the DTSTART property.
+    private static bool IsProperty(string line, string name) =>
+        line.StartsWith(name + ":", StringComparison.OrdinalIgnoreCase) ||
+        line.StartsWith(name + ";", StringComparison.OrdinalIgnoreCase);
 
     private static string Escape(string value) =>
         value.Replace("\\", "\\\\").Replace(";", "\\;").Replace(",", "\\,").Replace("\r\n", "\\n").Replace("\n", "\\n");

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Text;
@@ -53,9 +54,9 @@ public sealed partial class ActivityService(IHttpClientFactory clients)
     public async Task<IReadOnlyList<Activity>> ForDayAsync(DateOnly day, IReadOnlyList<string>? words,
         IReadOnlyList<string> places, CancellationToken ct)
     {
-        var city = await CityAsync(day, words, places, ct);
-        var events = await EventsAsync(day, words, places, ct);
-        return city.Concat(events)
+        var city = CityAsync(day, words, places, ct);
+        var events = EventsAsync(day, words, places, ct);
+        return (await city).Concat(await events)
             .Where(a => words is not null || MinimumAge(a.Age) is not > 3)
             .OrderByDescending(a => a.Score).ThenBy(a => a.Ongoing).ThenBy(a => a.Start ?? DateTime.MaxValue).ToList();
     }
@@ -64,13 +65,21 @@ public sealed partial class ActivityService(IHttpClientFactory clients)
     // user gives count as the youngest.
     public static int Score(string text, string place, IReadOnlyList<string>? words, IReadOnlyList<string> places)
     {
-        // Words start at a word boundary ("sagostunden" counts); "barn" must be a whole word, not "barnbarn".
-        bool Any(IEnumerable<string> list) => list.Any(w => Regex.IsMatch(text,
-            $@"(?<!\p{{L}}){Regex.Escape(w)}{(w is "barn" or "barnen" ? @"(?!\p{L})" : "")}", RegexOptions.IgnoreCase));
+        bool Any(IReadOnlyList<string> list) => list.Count > 0 && WordPattern(list).IsMatch(text);
         if (words is not null)
             return Any(words) ? 3 : AtPlace(text, place, places) ? 1 : 0;
         return Any(s_toddlerWords) ? 3 : Any(s_childWords) ? 2 : AtPlace(text, place, places) ? 1 : 0;
     }
+
+    private static readonly ConcurrentDictionary<string, Regex> s_wordPatterns = new();
+
+    // One pattern per word list. Words start at a word boundary ("sagostunden" counts); "barn" must be a whole
+    // word, not "barnbarn".
+    private static Regex WordPattern(IReadOnlyList<string> words) =>
+        s_wordPatterns.GetOrAdd(string.Join('\n', words), _ => new Regex(
+            @"(?<!\p{L})(?:" + string.Join("|", words.Select(w =>
+                Regex.Escape(w) + (w is "barn" or "barnen" ? @"(?!\p{L})" : ""))) + ")",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled));
 
     private static bool AtPlace(string text, string place, IReadOnlyList<string> places) =>
         places.Any(p => place.Contains(p, StringComparison.OrdinalIgnoreCase) ||
@@ -78,7 +87,7 @@ public sealed partial class ActivityService(IHttpClientFactory clients)
 
     // "från 6 år" or "8–12 år" give the youngest age the activity is for; null when none is stated.
     public static int? MinimumAge(string? age) =>
-        age is not null && Regex.Match(age, @"(\d{1,2})\s*(?:[-–]\s*\d{1,2}\s*)?(år|years)") is { Success: true } match
+        age is not null && YoungestAge().Match(age) is { Success: true } match
             ? int.Parse(match.Groups[1].Value)
             : null;
 
@@ -90,36 +99,36 @@ public sealed partial class ActivityService(IHttpClientFactory clients)
         var found = new List<Activity>();
         foreach (var item in json.RootElement.GetProperty("content").EnumerateArray())
         {
-            if (Text(item, "status").Equals("CANCELED", StringComparison.OrdinalIgnoreCase))
+            if (JsonPath.Text(item, "status").Equals("CANCELED", StringComparison.OrdinalIgnoreCase))
                 continue;
-            var title = Text(item, "title").Trim();
-            var unit = Text(item, "unit", "name").Trim();
-            var description = MailService.HtmlToText(Text(item, "description"));
+            var title = JsonPath.Text(item, "title").Trim();
+            var unit = JsonPath.Text(item, "unit", "name").Trim();
+            var description = PageTextExtractor.HtmlToText(JsonPath.Text(item, "description"));
             var score = Score(" " + title + " " + description + " ", unit, words, places);
             if (score == 0)
                 continue;
 
-            DateTime.TryParse(Text(item, "startTime"), CultureInfo.InvariantCulture, DateTimeStyles.None, out var start);
-            DateTime.TryParse(Text(item, "endTime"), CultureInfo.InvariantCulture, DateTimeStyles.None, out var end);
+            DateTime.TryParse(JsonPath.Text(item, "startTime"), CultureInfo.InvariantCulture, DateTimeStyles.None, out var start);
+            DateTime.TryParse(JsonPath.Text(item, "endTime"), CultureInfo.InvariantCulture, DateTimeStyles.None, out var end);
             string when;
-            var ongoing = !(Text(item, "eventType") == "single" || start.Date == end.Date);
+            var ongoing = !(JsonPath.Text(item, "eventType") == "single" || start.Date == end.Date);
             if (!ongoing)
                 when = $"{start:HH:mm}–{end:HH:mm}";
             else
             {
                 // An ongoing activity: its opening hours say which weekdays it is on.
-                var hours = MailService.HtmlToText(Text(item, "openingHours")).Replace('\n', ' ').Trim();
+                var hours = PageTextExtractor.HtmlToText(JsonPath.Text(item, "openingHours")).Replace('\n', ' ').Trim();
                 if (!OpenOn(hours, day))
                     continue;
                 when = hours.Length > 0 ? $"Opening hours: {hours}" : "All day";
             }
 
-            var place = Text(item, "location", "name").Trim();
+            var place = JsonPath.Text(item, "location", "name").Trim();
             found.Add(new Activity(title, place.Length > 0 && !place.Equals(unit, StringComparison.OrdinalIgnoreCase) ? $"{unit}, {place}" : unit,
                 when, start == default ? null : day.ToDateTime(TimeOnly.FromDateTime(start)),
                 JobService.Summarize(description), Age(title + " " + description),
-                MailService.HtmlToText(Text(item, "priceInformation")).Trim() is { Length: > 0 } price ? price : Free(description),
-                CityPage + Text(item, "id"), "Göteborgs Stad's calendar", score, ongoing));
+                PageTextExtractor.HtmlToText(JsonPath.Text(item, "priceInformation")).Trim() is { Length: > 0 } price ? price : Free(description),
+                CityPage + JsonPath.Text(item, "id"), "Göteborgs Stad's calendar", score, ongoing));
         }
 
         return found;
@@ -157,38 +166,29 @@ public sealed partial class ActivityService(IHttpClientFactory clients)
                 return cached.Events;
 
             var client = clients.CreateClient("concerts");
+            // The categories are read together; their pages are taken in order, so an event keeps its first category.
+            var categories = await Task.WhenAll(s_categories.Select(category => PagesAsync(client, category, ct)));
             var events = new Dictionary<string, CityEvent>();
-            foreach (var category in s_categories)
+            foreach (var page in categories.SelectMany(pages => pages))
             {
-                for (var page = 1; page <= 12; page++)
+                using var json = JsonDocument.Parse(page);
+                foreach (var item in json.RootElement.EnumerateArray())
                 {
-                    using var response = await client.GetAsync(
-                        $"{GoteborgCom}events?categories={category}&per_page=100&page={page}&_fields=title,link,excerpt,information", ct);
-                    if (!response.IsSuccessStatusCode)
-                        break;
-                    using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-                    var items = json.RootElement.EnumerateArray().ToList();
-                    foreach (var item in items)
-                    {
-                        var link = Text(item, "link");
-                        // Each event is also published in English under /en/.
-                        if (link.Contains("/en/") || events.ContainsKey(link))
-                            continue;
-                        var info = item.GetProperty("information");
-                        var dates = info.TryGetProperty("dates", out var list) && list.ValueKind == JsonValueKind.Array
-                            ? list.EnumerateArray().Select(d => (Start: Parse(Text(d, "start")), End: Parse(Text(d, "end"))))
-                                .Where(d => d.Start is not null).Select(d => (d.Start!.Value, d.End)).ToList()
-                            : [];
-                        events[link] = new CityEvent(WebUtility.HtmlDecode(Text(item, "title", "rendered")),
-                            WebUtility.HtmlDecode(Text(info, "place", "title")), dates,
-                            MailService.HtmlToText(Text(item, "excerpt", "rendered")),
-                            info.TryGetProperty("pricing", out var pricing) && pricing.TryGetProperty("free", out var free) &&
-                            free.ValueKind == JsonValueKind.True,
-                            link.Replace("://cms.goteborg.com/", "://www.goteborg.com/"));
-                    }
-
-                    if (items.Count < 100)
-                        break;
+                    var link = JsonPath.Text(item, "link");
+                    // Each event is also published in English under /en/.
+                    if (link.Contains("/en/") || events.ContainsKey(link))
+                        continue;
+                    var info = item.GetProperty("information");
+                    var dates = info.TryGetProperty("dates", out var list) && list.ValueKind == JsonValueKind.Array
+                        ? list.EnumerateArray().Select(d => (Start: JsonPath.Date(JsonPath.Text(d, "start")), End: JsonPath.Date(JsonPath.Text(d, "end"))))
+                            .Where(d => d.Start is not null).Select(d => (d.Start!.Value, d.End)).ToList()
+                        : [];
+                    events[link] = new CityEvent(WebUtility.HtmlDecode(JsonPath.Text(item, "title", "rendered")),
+                        WebUtility.HtmlDecode(JsonPath.Text(info, "place", "title")), dates,
+                        PageTextExtractor.HtmlToText(JsonPath.Text(item, "excerpt", "rendered")),
+                        info.TryGetProperty("pricing", out var pricing) && pricing.TryGetProperty("free", out var free) &&
+                        free.ValueKind == JsonValueKind.True,
+                        link.Replace("://cms.goteborg.com/", "://www.goteborg.com/"));
                 }
             }
 
@@ -199,6 +199,26 @@ public sealed partial class ActivityService(IHttpClientFactory clients)
         {
             s_cacheLock.Release();
         }
+    }
+
+    // One category's events, a page of 100 at a time, as JSON.
+    private static async Task<List<string>> PagesAsync(HttpClient client, int category, CancellationToken ct)
+    {
+        var pages = new List<string>();
+        for (var page = 1; page <= 12; page++)
+        {
+            using var response = await client.GetAsync(
+                $"{GoteborgCom}events?categories={category}&per_page=100&page={page}&_fields=title,link,excerpt,information", ct);
+            if (!response.IsSuccessStatusCode)
+                break;
+            var body = await response.Content.ReadAsStringAsync(ct);
+            pages.Add(body);
+            using var json = JsonDocument.Parse(body);
+            if (json.RootElement.GetArrayLength() < 100)
+                break;
+        }
+
+        return pages;
     }
 
     private static readonly string[] s_weekdays = ["söndag", "måndag", "tisdag", "onsdag", "torsdag", "fredag", "lördag"];
@@ -224,10 +244,16 @@ public sealed partial class ActivityService(IHttpClientFactory clients)
     }
 
     public static string? Age(string text) =>
-        AgePattern().Match(text) is { Success: true } match ? Regex.Replace(match.Value.Trim(), @"\s+", " ") : null;
+        AgePattern().Match(text) is { Success: true } match ? TextMatch.Collapse(match.Value) : null;
 
     private static string? Free(string text) =>
-        Regex.IsMatch(text, @"\b(gratis|fri entré|kostnadsfri|ingen kostnad)\b", RegexOptions.IgnoreCase) ? "Free" : null;
+        FreeWords().IsMatch(text) ? "Free" : null;
+
+    [GeneratedRegex(@"(\d{1,2})\s*(?:[-–]\s*\d{1,2}\s*)?(år|years)")]
+    private static partial Regex YoungestAge();
+
+    [GeneratedRegex(@"\b(gratis|fri entré|kostnadsfri|ingen kostnad)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex FreeWords();
 
     public static string Format(IReadOnlyList<Activity> activities, DateOnly day)
     {
@@ -246,20 +272,6 @@ public sealed partial class ActivityService(IHttpClientFactory clients)
         }
 
         return text.ToString().TrimEnd();
-    }
-
-    private static DateTime? Parse(string text) =>
-        DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date) ? date : null;
-
-    private static string Text(JsonElement element, params string[] path)
-    {
-        foreach (var name in path)
-        {
-            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(name, out element))
-                return "";
-        }
-
-        return element.ValueKind == JsonValueKind.String ? element.GetString() ?? "" : "";
     }
 
     [GeneratedRegex(@"(?:(?:från|for|för|barn|ages?|ålder)\s+)?\d{1,2}\s*(?:[-–]\s*\d{1,2}\s*)?(?:år|months|månader|years)(?:\s+och\s+uppåt)?", RegexOptions.IgnoreCase)]

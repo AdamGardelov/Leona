@@ -76,9 +76,8 @@ public static class ContextBudget
         return changed;
     }
 
-    public static string Excerpt(string text, int limit) => text.Length <= limit
-        ? text
-        : text[..limit] + "\n[Excerpt truncated]";
+    public static string Excerpt(string text, int limit, string marker = "\n[Excerpt truncated]") =>
+        text.Length <= limit ? text : text[..limit] + marker;
 }
 
 public sealed class ContextBudgetException(string message) : Exception(message);

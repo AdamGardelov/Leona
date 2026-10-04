@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { api, send, type AppNotification } from '../api';
+import { api, send, type AppNotification, errorText } from '../api';
 import { Icon } from '../icons';
 import { Dialog } from './Dialog';
+import { weekdayTime } from '../format';
 
 function base64UrlToBytes(value: string) {
   const padded =
@@ -56,7 +57,7 @@ export function NotificationsDialog({
         return send('/notifications/read', 'POST');
       })
       .then(onRead)
-      .catch((e) => setMessage(String(e)));
+      .catch((e) => setMessage(errorText(e)));
     if (!unsupported) {
       navigator.serviceWorker.ready
         .then((registration) => registration.pushManager.getSubscription())
@@ -86,7 +87,7 @@ export function NotificationsDialog({
       setPushState('on');
       setMessage('Notifications are on for this device.');
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : String(e));
+      setMessage(errorText(e));
     }
   }
 
@@ -150,13 +151,7 @@ export function NotificationsDialog({
             >
               <span className="notification-head">
                 <b>{n.title}</b>
-                <time dateTime={n.createdAt}>
-                  {new Date(n.createdAt).toLocaleString([], {
-                    weekday: 'short',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </time>
+                <time dateTime={n.createdAt}>{weekdayTime(n.createdAt)}</time>
               </span>
               <span className="notification-body">{n.body}</span>
             </a>

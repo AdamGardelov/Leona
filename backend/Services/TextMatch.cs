@@ -6,6 +6,9 @@ namespace Harness.Services;
 // and "skrivbordslampan" matches both "skrivbord" and "lampa".
 public static partial class TextMatch
 {
+    // Runs of whitespace, line breaks included, become one space.
+    public static string Collapse(string? text) => Whitespace().Replace(text ?? "", " ").Trim();
+
     public static List<string> Words(string? text) =>
         string.IsNullOrWhiteSpace(text)
             ? []
@@ -46,6 +49,9 @@ public static partial class TextMatch
             shared++;
         return shared >= 4 && shared >= shorter - 1;
     }
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex Whitespace();
 
     [GeneratedRegex(@"[\p{L}\p{N}]+")]
     private static partial Regex WordPattern();

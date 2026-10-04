@@ -150,9 +150,13 @@ public sealed class SpotifyService(AccountService accounts, IHttpClientFactory c
             scores[name] = entry;
         }
 
-        foreach (var (range, weight) in new[] { ("short_term", 1.5), ("medium_term", 1.2), ("long_term", 1.0) })
+        // The four requests run together; their answers are added in the same order as before.
+        (string Range, double Weight)[] ranges = [("short_term", 1.5), ("medium_term", 1.2), ("long_term", 1.0)];
+        var tops = ranges.Select(r => GetAsync(token, $"me/top/artists?time_range={r.Range}&limit=50", ct)).ToList();
+        var played = GetAsync(token, "me/player/recently-played?limit=50", ct);
+        foreach (var (request, weight) in tops.Zip(ranges.Select(r => r.Weight)))
         {
-            using var top = await GetAsync(token, $"me/top/artists?time_range={range}&limit=50", ct);
+            using var top = await request;
             var rank = 0;
             foreach (var artist in top.RootElement.GetProperty("items").EnumerateArray())
             {
@@ -163,7 +167,7 @@ public sealed class SpotifyService(AccountService accounts, IHttpClientFactory c
             }
         }
 
-        using var recent = await GetAsync(token, "me/player/recently-played?limit=50", ct);
+        using var recent = await played;
         foreach (var item in recent.RootElement.GetProperty("items").EnumerateArray())
         {
             foreach (var artist in item.GetProperty("track").GetProperty("artists").EnumerateArray())

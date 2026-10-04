@@ -6,7 +6,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from 'react';
-import { api, send, type Conversation, type Profile } from '../api';
+import { api, send, type Conversation, type Profile, errorText } from '../api';
 import { Icon, Mark, PanelToggle, type IconName } from '../icons';
 
 type RowProps = {
@@ -307,7 +307,7 @@ function ProfileSwitcher({
     setError('');
     api<Profile[]>('/profiles')
       .then(setProfiles)
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(errorText(e)));
     const close = (e: globalThis.KeyboardEvent) => {
       if (e.key === 'Escape') {
         setOpen(false);
@@ -326,7 +326,7 @@ function ProfileSwitcher({
       await send(`/profiles/${next.id}/use`, 'POST');
       window.location.assign('/');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   }
 

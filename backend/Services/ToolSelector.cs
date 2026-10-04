@@ -14,7 +14,7 @@ public static partial class ToolSelector
     private static readonly Family[] s_families =
     [
         new("mail", ["mail_search", "mail_read", "mail_attachment", "mail_manage", "mail_draft", "mail_send"], MailWords(), true),
-        new("calendar", ["calendar_events", "calendar_create", "calendar_delete"], CalendarWords(), true),
+        new("calendar", ["calendar_events", "calendar_create", "calendar_update", "calendar_delete"], CalendarWords(), true),
         new("home", ["home_states", "home_action"], HomeWords(), true),
         new("expenses", ["record_expense", "list_expenses"], ExpenseWords(), true),
         new("automations", ["schedule_task", "watch_page"], AutomationWords(), true),

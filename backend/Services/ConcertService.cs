@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -190,8 +189,7 @@ public sealed partial class ConcertService(
     private static readonly string[] s_months =
         ["januari", "februari", "mars", "april", "maj", "juni", "juli", "augusti", "september", "oktober", "november", "december"];
 
-    private static string Html(string? text) =>
-        WebUtility.HtmlDecode(Tags().Replace(text ?? "", " ")).Replace(' ', ' ').Trim();
+    private static string Html(string? text) => TextMatch.Collapse(PageTextExtractor.HtmlToText(text ?? ""));
 
     // Lower case without accents or punctuation, so "Håkan Hellström" matches "Hakan Hellstrom".
     public static string Normalize(string text)
@@ -205,38 +203,57 @@ public sealed partial class ConcertService(
             plain.Append(char.IsLetterOrDigit(c) ? c : ' ');
         }
 
-        return Spaces().Replace(plain.ToString(), " ").Trim();
+        return TextMatch.Collapse(plain.ToString());
     }
 
     // Whole-word match, so the artist "Kent" does not match "Kentkören". Names shorter than three
     // characters are ignored.
-    public static bool Mentions(string text, string artist)
+    public static bool Mentions(string text, string artist) =>
+        ArtistKey(artist) is { } key && $" {Normalize(text)} ".Contains(key, StringComparison.Ordinal);
+
+    // An artist's name as it is looked for in a normalized text, or null when it is too short.
+    private static string? ArtistKey(string artist)
     {
         var name = Normalize(artist);
         if (name.StartsWith("the "))
             name = name[4..];
-        return name.Length >= 3 && $" {Normalize(text)} ".Contains($" {name} ", StringComparison.Ordinal);
+        return name.Length >= 3 ? $" {name} " : null;
+    }
+
+    // Each name is normalized once, not once per concert.
+    private static List<(string Artist, string Key)> ArtistKeys(IEnumerable<string> artists) =>
+        artists.Select(a => (Artist: a, Key: ArtistKey(a))).Where(k => k.Key is not null)
+            .Select(k => (k.Artist, k.Key!)).ToList();
+
+    private static string? FirstArtistIn(string text, List<(string Artist, string Key)> keys)
+    {
+        var normal = $" {Normalize(text)} ";
+        return keys.FirstOrDefault(k => normal.Contains(k.Key, StringComparison.Ordinal)).Artist;
     }
 
     public static bool IsTribute(string title) => TributeWords().IsMatch(title);
 
-    public static List<ConcertMatch> Match(IEnumerable<Concert> concerts, IEnumerable<string> artists) =>
-        concerts.SelectMany(c => artists.Where(a => Mentions(c.Title, a))
-                .Take(1)
-                .Select(a => new ConcertMatch(c, a, IsTribute(c.Title))))
+    public static List<ConcertMatch> Match(IEnumerable<Concert> concerts, IEnumerable<string> artists)
+    {
+        var keys = ArtistKeys(artists);
+        return concerts.Select(c => FirstArtistIn(c.Title, keys) is { } artist
+                ? new ConcertMatch(c, artist, IsTribute(c.Title))
+                : null)
+            .OfType<ConcertMatch>()
             .OrderBy(m => m.Tribute).ThenBy(m => m.Concert.Start).ToList();
+    }
 
     // Calendar pages are plain text: every line that names an artist becomes a lead.
     public static List<ConcertMatch> MatchPages(IEnumerable<(string Name, string Url, string Text)> pages,
         IEnumerable<string> artists)
     {
-        var names = artists.ToList();
+        var keys = ArtistKeys(artists);
         var leads = new List<ConcertMatch>();
         foreach (var (name, url, text) in pages)
         {
             foreach (var line in text.Split('\n').Select(l => l.Trim()).Where(l => l.Length is > 2 and < 200))
             {
-                if (names.FirstOrDefault(a => Mentions(line, a)) is { } artist &&
+                if (FirstArtistIn(line, keys) is { } artist &&
                     leads.All(l => l.Artist != artist || l.Concert.Url != url))
                     leads.Add(new ConcertMatch(new Concert(line, null, name, url, null, "", new Uri(url).Host), artist,
                         IsTribute(line)));
@@ -251,8 +268,8 @@ public sealed partial class ConcertService(
         IEnumerable<string> genres, int take)
     {
         var words = genres.SelectMany(g => GenreWords(g)).Distinct().ToList();
-        return concerts.Select(c => (Concert: c,
-                Genre: words.FirstOrDefault(w => $" {Normalize(c.Title + " " + c.Summary)} ".Contains($" {w} "))))
+        return concerts.Select(c => (Concert: c, Text: $" {Normalize(c.Title + " " + c.Summary)} "))
+            .Select(c => (c.Concert, Genre: words.FirstOrDefault(w => c.Text.Contains($" {w} "))))
             .Where(c => c.Genre is not null)
             .OrderBy(c => c.Concert.Start).Take(take).Select(c => (c.Concert, c.Genre!)).ToList();
     }
@@ -290,12 +307,6 @@ public sealed partial class ConcertService(
 
     [GeneratedRegex(@"\b\d{1,2}[:.]\d{2}\b")]
     private static partial Regex TimeOfDay();
-
-    [GeneratedRegex(@"<[^>]+>")]
-    private static partial Regex Tags();
-
-    [GeneratedRegex(@"\s+")]
-    private static partial Regex Spaces();
 
     [GeneratedRegex(@"\b(tribute|hyllning|hyllar|cover|plays the music of|spelar .+s musik)", RegexOptions.IgnoreCase)]
     private static partial Regex TributeWords();

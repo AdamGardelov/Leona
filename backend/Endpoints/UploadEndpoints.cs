@@ -9,22 +9,15 @@ public static class UploadEndpoints
     {
         var group = app.MapGroup("/api/uploads");
         // Writes are protected by the same-origin check in Program.cs, so form antiforgery tokens are not used.
-        group.MapPost("", UploadAsync).DisableAntiforgery();
+        group.MapPost("", UploadAsync).DisableAntiforgery().WithInputErrors();
         group.MapGet("/{id:guid}", DownloadAsync);
     }
 
     private static async Task<IResult> UploadAsync(IFormFile file, UploadStore store, ChatDb db, CancellationToken ct)
     {
-        try
-        {
-            await using var stream = file.OpenReadStream();
-            var upload = await store.SaveAsync(db, file.FileName, stream, file.Length, ct);
-            return Results.Ok(UploadStore.Reference(upload));
-        }
-        catch (ArgumentException ex)
-        {
-            return Results.BadRequest(new { error = ex.Message });
-        }
+        await using var stream = file.OpenReadStream();
+        var upload = await store.SaveAsync(db, file.FileName, stream, file.Length, ct);
+        return Results.Ok(UploadStore.Reference(upload));
     }
 
     private static async Task<IResult> DownloadAsync(Guid id, UploadStore store, ChatDb db, HttpContext context,

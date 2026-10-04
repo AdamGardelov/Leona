@@ -38,7 +38,7 @@ public sealed partial class JobService(IHttpClientFactory clients)
     public static bool IsAgency(string employer) => Agency().IsMatch(employer);
 
     public static string Summarize(string text) =>
-        ContextBudget.Excerpt(Regex.Replace(text, @"\s+", " ").Trim(), 400).Replace("\n[Excerpt truncated]", "…");
+        ContextBudget.Excerpt(TextMatch.Collapse(text), 400, "…");
 
     // The same role often appears both in Platsbanken and on the employer's own page; keep the first.
     public static IReadOnlyList<JobAd> Distinct(IEnumerable<JobAd> ads) =>
@@ -50,13 +50,18 @@ public sealed partial class JobService(IHttpClientFactory clients)
         CancellationToken ct)
     {
         var client = clients.CreateClient("jobs");
-        var found = new Dictionary<string, JobAd>();
-        foreach (var query in queries.Take(10))
+        // The queries are asked together and read in order, so the first query still wins a duplicate.
+        var pages = await Task.WhenAll(queries.Take(10).Select(async query =>
         {
-            var url = $"{Endpoint}?q={Uri.EscapeDataString(query)}&region={Region}&limit=100";
-            using var response = await client.GetAsync(url, ct);
+            using var response = await client.GetAsync(
+                $"{Endpoint}?q={Uri.EscapeDataString(query)}&region={Region}&limit=100", ct);
             response.EnsureSuccessStatusCode();
-            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            return await response.Content.ReadAsStringAsync(ct);
+        }));
+        var found = new Dictionary<string, JobAd>();
+        foreach (var page in pages)
+        {
+            using var json = JsonDocument.Parse(page);
             foreach (var hit in json.RootElement.GetProperty("hits").EnumerateArray())
             {
                 if (Read(hit, queries) is { } ad && !found.ContainsKey(ad.Id) && !Excluded(ad, exclude))
@@ -71,22 +76,22 @@ public sealed partial class JobService(IHttpClientFactory clients)
     {
         if (hit.TryGetProperty("removed", out var removed) && removed.ValueKind == JsonValueKind.True)
             return null;
-        var place = Text(hit, "workplace_address", "municipality");
+        var place = JsonPath.Text(hit, "workplace_address", "municipality");
         if (!s_goteborgRegion.Contains(place))
             return null;
 
-        var title = Text(hit, "headline");
-        var description = Text(hit, "description", "text");
-        var field = Text(hit, "occupation_field", "label");
+        var title = JsonPath.Text(hit, "headline");
+        var description = JsonPath.Text(hit, "description", "text");
+        var field = JsonPath.Text(hit, "occupation_field", "label");
         var titleMatch = queries.Any(q => title.Contains(q, StringComparison.OrdinalIgnoreCase));
         if (!titleMatch && !(field.StartsWith("Data/IT", StringComparison.OrdinalIgnoreCase) && DotNet().IsMatch(description)))
             return null;
 
-        var employer = Text(hit, "employer", "name");
+        var employer = JsonPath.Text(hit, "employer", "name");
         var opening = description[..Math.Min(description.Length, 800)];
-        return new JobAd(Text(hit, "id"), title, employer, place, Date(hit, "publication_date"),
-            Date(hit, "application_deadline"), Text(hit, "webpage_url"),
-            Text(hit, "application_details", "url") is { Length: > 0 } apply ? apply : null,
+        return new JobAd(JsonPath.Text(hit, "id"), title, employer, place, Date(hit, "publication_date"),
+            Date(hit, "application_deadline"), JsonPath.Text(hit, "webpage_url"),
+            JsonPath.Text(hit, "application_details", "url") is { Length: > 0 } apply ? apply : null,
             Summarize(description),
             Agency().IsMatch(employer) || AgencyText().IsMatch(opening), titleMatch,
             ProductCompany().IsMatch(title) || ProductCompany().IsMatch(opening));
@@ -129,19 +134,7 @@ public sealed partial class JobService(IHttpClientFactory clients)
 
     private static string Day(DateTime? date) => date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "not given";
 
-    private static string Text(JsonElement element, params string[] path)
-    {
-        foreach (var name in path)
-        {
-            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(name, out element))
-                return "";
-        }
-
-        return element.ValueKind == JsonValueKind.String ? element.GetString() ?? "" : element.ToString();
-    }
-
-    private static DateTime? Date(JsonElement hit, string name) =>
-        DateTime.TryParse(Text(hit, name), CultureInfo.InvariantCulture, DateTimeStyles.None, out var date) ? date : null;
+    private static DateTime? Date(JsonElement hit, string name) => JsonPath.Date(JsonPath.Text(hit, name));
 
     [GeneratedRegex(@"\.net\b|\bc#|\bdotnet\b", RegexOptions.IgnoreCase)]
     private static partial Regex DotNet();

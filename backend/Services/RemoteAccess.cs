@@ -28,6 +28,7 @@ public sealed class RemoteAccess(IConfiguration configuration, IServiceScopeFact
     private int _failedAttempts;
     private (DateTime At, IReadOnlyList<string> Addresses) _addressCache = (DateTime.MinValue, []);
     private (DateTime At, string? Host) _tailscaleCache = (DateTime.MinValue, null);
+    private readonly Lock _tailscaleLock = new();
 
     public bool Enabled => configuration.GetValue("Remote:Enabled", false);
     public int Port => configuration.GetValue("Remote:Port", 5080);
@@ -77,9 +78,17 @@ public sealed class RemoteAccess(IConfiguration configuration, IServiceScopeFact
         var configured = configuration["Remote:TailscaleHost"];
         if (!string.IsNullOrWhiteSpace(configured))
             return configured.Trim().TrimEnd('.').ToLowerInvariant();
-        if (DateTime.UtcNow - _tailscaleCache.At < TimeSpan.FromMinutes(1))
+        // One request asks tailscale at a time; the others use the answer.
+        lock (_tailscaleLock)
+        {
+            if (DateTime.UtcNow - _tailscaleCache.At >= TimeSpan.FromMinutes(1))
+                _tailscaleCache = (DateTime.UtcNow, AskTailscale());
             return _tailscaleCache.Host;
+        }
+    }
 
+    private static string? AskTailscale()
+    {
         string? host = null;
         try
         {
@@ -89,9 +98,12 @@ public sealed class RemoteAccess(IConfiguration configuration, IServiceScopeFact
                 RedirectStandardError = true,
                 UseShellExecute = false
             });
-            if (process is not null && process.WaitForExit(3000) && process.ExitCode == 0)
+            // Reading while it runs keeps a large status from filling the pipe and stalling the process.
+            var output = process?.StandardOutput.ReadToEndAsync();
+            _ = process?.StandardError.ReadToEndAsync();
+            if (process is not null && output is not null && process.WaitForExit(3000) && process.ExitCode == 0)
             {
-                using var json = System.Text.Json.JsonDocument.Parse(process.StandardOutput.ReadToEnd());
+                using var json = System.Text.Json.JsonDocument.Parse(output.Result);
                 if (json.RootElement.TryGetProperty("Self", out var self) &&
                     self.TryGetProperty("DNSName", out var name))
                     host = name.GetString()?.TrimEnd('.').ToLowerInvariant();
@@ -103,8 +115,7 @@ public sealed class RemoteAccess(IConfiguration configuration, IServiceScopeFact
             // Tailscale is not installed or not running.
         }
 
-        _tailscaleCache = (DateTime.UtcNow, string.IsNullOrEmpty(host) ? null : host);
-        return _tailscaleCache.Host;
+        return string.IsNullOrEmpty(host) ? null : host;
     }
 
     // Host names other than these are refused, which keeps DNS rebinding out.

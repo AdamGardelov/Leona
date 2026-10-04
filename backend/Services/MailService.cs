@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.RegularExpressions;
-using AngleSharp.Html.Parser;
 using Harness.Models;
 using MailKit;
 using MailKit.Net.Imap;
@@ -68,7 +67,7 @@ public partial class MailService(AccountService accounts)
     private static async Task<string> DetailAsync(IMailFolder folder, UniqueId uid, CancellationToken ct)
     {
         var message = await folder.GetMessageAsync(uid, ct);
-        var detail = new StringBuilder($"\n  Text: {ContextBudget.Excerpt(Collapse(BodyText(message)), 900)}");
+        var detail = new StringBuilder($"\n  Text: {ContextBudget.Excerpt(TextMatch.Collapse(BodyText(message)), 900)}");
         foreach (var part in Attachments(message).OfType<MimePart>().Take(2))
         {
             var name = AttachmentName(part, 0);
@@ -90,7 +89,7 @@ public partial class MailService(AccountService accounts)
                 await using (var file = File.Create(path))
                     await part.Content.DecodeToAsync(file, ct);
                 var text = string.Join(" ", DocumentReader.Extract(path).Parts);
-                detail.Append($"\n  Attachment {name}: {ContextBudget.Excerpt(Collapse(text), 900)}");
+                detail.Append($"\n  Attachment {name}: {ContextBudget.Excerpt(TextMatch.Collapse(text), 900)}");
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -104,8 +103,6 @@ public partial class MailService(AccountService accounts)
 
         return detail.ToString();
     }
-
-    private static string Collapse(string text) => Regex.Replace(text, @"\s+", " ").Trim();
 
     // One line of a mail_search result, which the app shows as a list the user can tick and act on.
     public record MailItem(string Id, string Date, string From, string Subject, bool Unread, bool Newsletter);
@@ -132,7 +129,7 @@ public partial class MailService(AccountService accounts)
     // The message as the user would write it in a draft block: recipients, subject, a blank line, the text.
     public static string DraftText(MimeMessage message) =>
         $"To: {message.To}" + (message.Cc.Count > 0 ? $"\nCc: {message.Cc}" : "") +
-        $"\nSubject: {message.Subject}\n\n{(message.TextBody ?? HtmlToText(message.HtmlBody ?? "")).TrimEnd()}";
+        $"\nSubject: {message.Subject}\n\n{(message.TextBody ?? PageTextExtractor.HtmlToText(message.HtmlBody ?? "")).TrimEnd()}";
 
     // Drafts and Sent through SPECIAL-USE when the server has it, else common names.
     private static async Task<IMailFolder?> SpecialAsync(ImapClient client, SpecialFolder special, string[] names,
@@ -217,7 +214,7 @@ public partial class MailService(AccountService accounts)
                 continue;
             }
 
-            var preview = Regex.Replace(s.PreviewText ?? "", @"\s+", " ").Trim();
+            var preview = TextMatch.Collapse(s.PreviewText);
             lines.Add($"{line}\n  {ContextBudget.Excerpt(preview, 200)}");
         }
 
@@ -467,24 +464,11 @@ public partial class MailService(AccountService accounts)
         if (plain is not null && (message.HtmlBody is null || CssRule().Matches(plain).Count < 10))
             return plain;
 
-        return HtmlToText(message.HtmlBody ?? "") is { Length: > 0 } text ? text : plain ?? "";
+        return PageTextExtractor.HtmlToText(message.HtmlBody ?? "") is { Length: > 0 } text ? text : plain ?? "";
     }
 
     [GeneratedRegex(@"[\w-]+\s*:\s*[^;{}\n]+;")]
     private static partial Regex CssRule();
-
-    public static string HtmlToText(string html)
-    {
-        if (html.Length == 0)
-            return "";
-        using var document = new HtmlParser().ParseDocument(html);
-        foreach (var node in document.QuerySelectorAll("script,style,head"))
-            node.Remove();
-        foreach (var node in document.QuerySelectorAll("p,div,li,h1,h2,h3,h4,br,tr,table,blockquote"))
-            node.After(document.CreateTextNode("\n"));
-        var text = Regex.Replace(document.Body?.TextContent ?? "", @"[^\S\n]+", " ");
-        return Regex.Replace(text, @" ?\n[\s]*", "\n").Trim();
-    }
 
     // Builds the message without sending; also used for the approval preview.
     public async Task<MimeMessage> BuildAsync(Account account, Outgoing mail, CancellationToken ct)

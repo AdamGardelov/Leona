@@ -43,7 +43,7 @@ public sealed partial class SpeechService(IConfiguration config, IWebHostEnviron
             }
 
             logger.LogInformation("Transcribed speech in {Seconds:0.0} s", (DateTime.UtcNow - started).TotalSeconds);
-            return Regex.Replace(text.ToString(), @"\s+", " ").Trim();
+            return TextMatch.Collapse(text.ToString());
         }
         finally
         {

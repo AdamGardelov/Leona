@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react';
-import { api, type RunAction, type RunEvent, type RunLog, type StepStatus } from '../api';
+import {
+  api,
+  type RunAction,
+  type RunEvent,
+  type RunLog,
+  type StepStatus,
+  errorText,
+} from '../api';
 import { describeStep, statusLabels } from '../steps';
 import { Dialog } from './Dialog';
+import { seconds } from '../format';
 
 type RequestDetail = {
   contextWindow?: number;
@@ -77,7 +85,7 @@ export function InspectorDialog({
     setError('');
     api<RunLog>(`/runs/${runId}/log`)
       .then(setLog)
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(errorText(e)));
   }
 
   useEffect(() => {
@@ -212,7 +220,7 @@ export function InspectorDialog({
                         <span className="inspect-status">
                           {statusLabels[status] ?? status}
                           {entry.finished?.durationMs !== undefined &&
-                            ` · ${(entry.finished.durationMs / 1000).toFixed(1)} s`}
+                            ` · ${seconds(entry.finished.durationMs)}`}
                           {entry.action && ` · ledger: ${entry.action.status}`}
                         </span>
                       </div>

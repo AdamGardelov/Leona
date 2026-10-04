@@ -170,7 +170,7 @@ Automations (the clock in the sidebar) run prompts on a schedule, such as the mo
 
 Concerts come from Göteborg's official event calendar ([goteborg.com](https://www.goteborg.com/evenemang), its public WordPress API, category *Musik & konserter*) and venue calendars read as text (`Concerts:Calendars`, Pustervik by default), refreshed every six hours. Artists are matched in code by whole words (accents ignored; tribute shows are marked), not by the model. Small venues that are on neither may be missing. **Add concert radar** in Automations runs every Monday at 09:00 with `new_only` and notifies only when there is a new concert: a scheduled run whose news-reporting tools all found nothing new ends without a notification.
 
-People go first: a scheduled run waits until nobody has used the model for a minute (`Background:QuietSeconds`), and if someone starts chatting while it runs, its current step is stopped, thrown away and redone when the model is free. "Run now" starts immediately.
+People go first: a scheduled run waits until nobody has used the model for a minute (`Background:QuietSeconds`), and if someone starts chatting while it runs, its current step is stopped, thrown away and redone when the model is free. "Run now" starts immediately, and the task's card shows that it is running (with Follow along to watch it), waiting for your approval, finished, or why it could not start.
 
 ## Profiles
 

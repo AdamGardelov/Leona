@@ -71,6 +71,11 @@ public class ConversationService(ChatDb db)
         return await db.Conversations.Where(c => c.Id == id).ExecuteDeleteAsync(ct) > 0;
     }
 
+    // The newest answer in a chat, for notifications and Siri.
+    public static async Task<string> LatestReplyAsync(ChatDb db, int conversationId, CancellationToken ct) =>
+        await db.Messages.AsNoTracking().Where(m => m.ConversationId == conversationId && m.Role == "assistant")
+            .OrderByDescending(m => m.Id).Select(m => m.Content).FirstOrDefaultAsync(ct) ?? "";
+
     // Messages with the saved tool steps of each turn attached to its assistant reply.
     public async Task<List<MessageView>> GetMessagesAsync(int id, CancellationToken ct)
     {

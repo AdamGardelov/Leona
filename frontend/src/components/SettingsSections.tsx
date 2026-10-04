@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api, send, type Folder, type MemoryItem, type TrustedSite } from '../api';
 import { Icon } from '../icons';
+import { useSection } from '../useSection';
 import { CopyButton } from './CodeBlock';
+import { ErrorAlert } from './ErrorAlert';
 
 type JobEmployer = { id: string; name: string; url: string; system: string };
 
@@ -18,45 +20,93 @@ const systemNames: Record<string, string> = {
   name: 'By name, in Platsbanken',
 };
 
+function RemoveButton({
+  label,
+  title = 'Remove',
+  onClick,
+}: {
+  label: string;
+  title?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="message-action"
+      aria-label={label}
+      title={title}
+      onClick={onClick}
+    >
+      <Icon name="trash" size={15} />
+    </button>
+  );
+}
+
+// A one-field form that adds an item to a section's list.
+function InlineAdd({
+  id,
+  label,
+  placeholder,
+  value,
+  onChange,
+  onAdd,
+  button,
+  address = false,
+  disabled = false,
+}: {
+  id: string;
+  label: string;
+  placeholder: string;
+  value: string;
+  onChange: (value: string) => void;
+  onAdd: () => void;
+  button: string;
+  // Web addresses get the URL keyboard and no autocorrection.
+  address?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <form
+      className="inline-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onAdd();
+      }}
+    >
+      <label htmlFor={id} className="visually-hidden">
+        {label}
+      </label>
+      <input
+        id={id}
+        placeholder={placeholder}
+        inputMode={address ? 'url' : undefined}
+        autoCapitalize={address ? 'none' : undefined}
+        autoCorrect={address ? 'off' : undefined}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <button className="secondary" disabled={!value.trim() || disabled}>
+        {button}
+      </button>
+    </form>
+  );
+}
+
 // Employers the job radar watches: their own career pages are read directly, next to Platsbanken.
 export function JobRadarSection({ open }: { open: boolean }) {
   const [employers, setEmployers] = useState<JobEmployer[]>([]);
   const [url, setUrl] = useState('');
   const [adding, setAdding] = useState(false);
-  const [error, setError] = useState('');
-
-  async function load() {
+  const { error, run } = useSection(open, async () => {
     setEmployers(await api<JobEmployer[]>('/jobs/employers'));
-  }
-
-  useEffect(() => {
-    if (open) {
-      setError('');
-      load().catch((e) => setError(String(e)));
-    }
-  }, [open]);
+  });
 
   async function add() {
-    setError('');
     setAdding(true);
-    try {
-      await send('/jobs/employers', 'POST', { url });
+    if (await run(() => send('/jobs/employers', 'POST', { url }))) {
       setUrl('');
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setAdding(false);
     }
-  }
-
-  async function remove(employer: JobEmployer) {
-    try {
-      await send(`/jobs/employers/${employer.id}`, 'DELETE');
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
+    setAdding(false);
   }
 
   return (
@@ -75,47 +125,26 @@ export function JobRadarSection({ open }: { open: boolean }) {
             <li key={employer.id}>
               <span className="list-name">{employer.name}</span>
               <span className="list-path">{systemNames[employer.system] ?? employer.system}</span>
-              <button
-                type="button"
-                className="message-action"
-                aria-label={`Stop watching ${employer.name}`}
-                title="Remove"
-                onClick={() => void remove(employer)}
-              >
-                <Icon name="trash" size={15} />
-              </button>
+              <RemoveButton
+                label={`Stop watching ${employer.name}`}
+                onClick={() => void run(() => send(`/jobs/employers/${employer.id}`, 'DELETE'))}
+              />
             </li>
           ))}
         </ul>
       )}
-      <form
-        className="inline-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void add();
-        }}
-      >
-        <label htmlFor="job-employer" className="visually-hidden">
-          Career page address or company name
-        </label>
-        <input
-          id="job-employer"
-          placeholder="Career page address or company name"
-          inputMode="url"
-          autoCapitalize="none"
-          autoCorrect="off"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-        />
-        <button className="secondary" disabled={!url.trim() || adding}>
-          {adding ? 'Checking…' : 'Add employer'}
-        </button>
-      </form>
-      {error && (
-        <div role="alert" className="error">
-          {error}
-        </div>
-      )}
+      <InlineAdd
+        id="job-employer"
+        label="Career page address or company name"
+        placeholder="Career page address or company name"
+        value={url}
+        onChange={setUrl}
+        onAdd={() => void add()}
+        button={adding ? 'Checking…' : 'Add employer'}
+        address
+        disabled={adding}
+      />
+      <ErrorAlert error={error} />
     </section>
   );
 }
@@ -128,46 +157,33 @@ export function SiriSection({ open }: { open: boolean }) {
   const [keys, setKeys] = useState<SiriKey[]>([]);
   const [url, setUrl] = useState<string | null>(null);
   const [created, setCreated] = useState<string | null>(null);
-  const [error, setError] = useState('');
-
-  async function load() {
+  const { error, run } = useSection(open, async () => {
     const data = await api<{ url: string | null; keys: SiriKey[] }>('/siri');
     setKeys(data.keys);
     setUrl(
       data.url ??
         (window.location.protocol === 'https:' ? `${window.location.origin}/api/ask` : null),
     );
-  }
+  });
 
   useEffect(() => {
     if (open) {
-      setError('');
       setCreated(null);
-      load().catch((e) => setError(String(e)));
     }
   }, [open]);
 
-  async function create() {
-    setError('');
-    try {
+  function create() {
+    void run(async () => {
       const result = await send<{ key: string }>('/siri/keys', 'POST', { name: 'Siri' });
       setCreated(result.key);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
+    });
   }
 
-  async function remove(key: SiriKey) {
+  function remove(key: SiriKey) {
     if (!window.confirm('Remove this Siri key? The shortcut that uses it stops working.')) {
       return;
     }
-    try {
-      await send(`/siri/keys/${key.id}`, 'DELETE');
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
+    void run(() => send(`/siri/keys/${key.id}`, 'DELETE'));
   }
 
   return (
@@ -184,15 +200,7 @@ export function SiriSection({ open }: { open: boolean }) {
             <li key={key.id}>
               <span className="mono list-name">{key.name}</span>
               <span className="list-path">Made {new Date(key.createdAt).toLocaleDateString()}</span>
-              <button
-                type="button"
-                className="message-action"
-                aria-label={`Remove the Siri key ${key.name}`}
-                title="Remove"
-                onClick={() => void remove(key)}
-              >
-                <Icon name="trash" size={15} />
-              </button>
+              <RemoveButton label={`Remove the Siri key ${key.name}`} onClick={() => remove(key)} />
             </li>
           ))}
         </ul>
@@ -245,15 +253,11 @@ export function SiriSection({ open }: { open: boolean }) {
           </p>
         </div>
       ) : (
-        <button type="button" className="secondary" onClick={() => void create()}>
+        <button type="button" className="secondary" onClick={create}>
           Create a Siri key
         </button>
       )}
-      {error && (
-        <div role="alert" className="error">
-          {error}
-        </div>
-      )}
+      <ErrorAlert error={error} />
     </section>
   );
 }
@@ -263,36 +267,13 @@ export function SiriSection({ open }: { open: boolean }) {
 export function TrustedSitesSection({ open }: { open: boolean }) {
   const [sites, setSites] = useState<TrustedSite[]>([]);
   const [address, setAddress] = useState('');
-  const [error, setError] = useState('');
-
-  async function load() {
+  const { error, run } = useSection(open, async () => {
     setSites(await api<TrustedSite[]>('/trusted-sites'));
-  }
-
-  useEffect(() => {
-    if (open) {
-      setError('');
-      load().catch((e) => setError(String(e)));
-    }
-  }, [open]);
+  });
 
   async function add() {
-    setError('');
-    try {
-      await send('/trusted-sites', 'POST', { address });
+    if (await run(() => send('/trusted-sites', 'POST', { address }))) {
       setAddress('');
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  async function remove(site: TrustedSite) {
-    try {
-      await send(`/trusted-sites/${site.id}`, 'DELETE');
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -308,47 +289,25 @@ export function TrustedSitesSection({ open }: { open: boolean }) {
           {sites.map((site) => (
             <li key={site.id}>
               <span className="mono list-name">{site.host}</span>
-              <button
-                type="button"
-                className="message-action"
-                aria-label={`Stop trusting ${site.host}`}
-                title="Remove"
-                onClick={() => void remove(site)}
-              >
-                <Icon name="trash" size={15} />
-              </button>
+              <RemoveButton
+                label={`Stop trusting ${site.host}`}
+                onClick={() => void run(() => send(`/trusted-sites/${site.id}`, 'DELETE'))}
+              />
             </li>
           ))}
         </ul>
       )}
-      <form
-        className="inline-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void add();
-        }}
-      >
-        <label htmlFor="trusted-site" className="visually-hidden">
-          Website
-        </label>
-        <input
-          id="trusted-site"
-          placeholder="liseberg.se"
-          inputMode="url"
-          autoCapitalize="none"
-          autoCorrect="off"
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
-        />
-        <button className="secondary" disabled={!address.trim()}>
-          Add site
-        </button>
-      </form>
-      {error && (
-        <div role="alert" className="error">
-          {error}
-        </div>
-      )}
+      <InlineAdd
+        id="trusted-site"
+        label="Website"
+        placeholder="liseberg.se"
+        value={address}
+        onChange={setAddress}
+        onAdd={() => void add()}
+        button="Add site"
+        address
+      />
+      <ErrorAlert error={error} />
     </section>
   );
 }
@@ -358,38 +317,15 @@ export function FoldersSection({ open }: { open: boolean }) {
   const [workspace, setWorkspace] = useState('');
   const [folders, setFolders] = useState<Folder[]>([]);
   const [path, setPath] = useState('');
-  const [error, setError] = useState('');
-
-  async function load() {
+  const { error, run } = useSection(open, async () => {
     const data = await api<{ workspace: string; folders: Folder[] }>('/folders');
     setWorkspace(data.workspace);
     setFolders(data.folders);
-  }
-
-  useEffect(() => {
-    if (open) {
-      setError('');
-      load().catch((e) => setError(String(e)));
-    }
-  }, [open]);
+  });
 
   async function add() {
-    setError('');
-    try {
-      await send('/folders', 'POST', { path });
+    if (await run(() => send('/folders', 'POST', { path }))) {
       setPath('');
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  async function remove(folder: Folder) {
-    try {
-      await send(`/folders/${folder.id}`, 'DELETE');
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -409,43 +345,23 @@ export function FoldersSection({ open }: { open: boolean }) {
           <li key={folder.id}>
             <span className="mono list-name">{folder.name}</span>
             <span className="list-path">{folder.path}</span>
-            <button
-              type="button"
-              className="message-action"
-              aria-label={`Remove folder ${folder.name}`}
-              title="Remove"
-              onClick={() => void remove(folder)}
-            >
-              <Icon name="trash" size={15} />
-            </button>
+            <RemoveButton
+              label={`Remove folder ${folder.name}`}
+              onClick={() => void run(() => send(`/folders/${folder.id}`, 'DELETE'))}
+            />
           </li>
         ))}
       </ul>
-      <form
-        className="inline-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void add();
-        }}
-      >
-        <label htmlFor="folder-path" className="visually-hidden">
-          Folder path
-        </label>
-        <input
-          id="folder-path"
-          placeholder="/home/you/projects/app"
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-        />
-        <button className="secondary" disabled={!path.trim()}>
-          Add folder
-        </button>
-      </form>
-      {error && (
-        <div role="alert" className="error">
-          {error}
-        </div>
-      )}
+      <InlineAdd
+        id="folder-path"
+        label="Folder path"
+        placeholder="/home/you/projects/app"
+        value={path}
+        onChange={setPath}
+        onAdd={() => void add()}
+        button="Add folder"
+      />
+      <ErrorAlert error={error} />
     </section>
   );
 }
@@ -453,25 +369,9 @@ export function FoldersSection({ open }: { open: boolean }) {
 export function MemorySection({ open }: { open: boolean }) {
   const [memories, setMemories] = useState<MemoryItem[]>([]);
   const [query, setQuery] = useState('');
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (open) {
-      setError('');
-      api<MemoryItem[]>('/memories')
-        .then(setMemories)
-        .catch((e) => setError(String(e)));
-    }
-  }, [open]);
-
-  async function remove(memory: MemoryItem) {
-    try {
-      await send(`/memories/${memory.id}`, 'DELETE');
-      setMemories((previous) => previous.filter((m) => m.id !== memory.id));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }
+  const { error, run } = useSection(open, async () => {
+    setMemories(await api<MemoryItem[]>('/memories'));
+  });
 
   const filter = query.trim().toLowerCase();
   const visible = memories.filter((m) => m.text.toLowerCase().includes(filter));
@@ -498,15 +398,11 @@ export function MemorySection({ open }: { open: boolean }) {
             <li key={memory.id}>
               <span className="list-text">{memory.text}</span>
               <span className="list-path">{new Date(memory.createdAt).toLocaleDateString()}</span>
-              <button
-                type="button"
-                className="message-action"
-                aria-label={`Forget: ${memory.text}`}
+              <RemoveButton
+                label={`Forget: ${memory.text}`}
                 title="Forget"
-                onClick={() => void remove(memory)}
-              >
-                <Icon name="trash" size={15} />
-              </button>
+                onClick={() => void run(() => send(`/memories/${memory.id}`, 'DELETE'))}
+              />
             </li>
           ))}
         </ul>
@@ -517,11 +413,7 @@ export function MemorySection({ open }: { open: boolean }) {
             : 'Nothing saved yet. Ask Leona to remember something.'}
         </p>
       )}
-      {error && (
-        <div role="alert" className="error">
-          {error}
-        </div>
-      )}
+      <ErrorAlert error={error} />
     </section>
   );
 }

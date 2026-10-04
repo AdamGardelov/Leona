@@ -36,8 +36,7 @@ public class PersonalTools(
     public const string ExpensesHeader = "date,merchant,amount,currency,category,note\n";
 
     // Each profile has its own spreadsheet outside the workspace, downloadable under Settings › Accounts.
-    private string ExpensesFile => personalFiles.ExpensesPath(
-        profile.Id ?? throw new InvalidOperationException("Expenses need a profile."));
+    private string ExpensesFile => personalFiles.ExpensesPath(ProfileId);
 
     public static readonly HashSet<string> Names =
     [
@@ -289,15 +288,47 @@ public class PersonalTools(
               throw new ArgumentException($"Unknown {what} \"{label}\". Available: {string.Join(", ", list.Select(a => a.Label))}.");
     }
 
-    private Account MailAccount(ToolArguments args)
-    {
-        if (args.Optional("reply_to") is { } replyTo)
-        {
-            var (accountId, _, _) = MailService.ParseId(replyTo);
-            return _mail.FirstOrDefault(a => a.Id == accountId) ?? throw new ArgumentException("Unknown message id.");
-        }
+    private Account MailAccount(ToolArguments args) =>
+        args.Optional("reply_to") is { } replyTo ? Mailbox(replyTo) : Pick(_mail, args.Optional("account", 40), "mailbox");
 
-        return Pick(_mail, args.Optional("account", 40), "mailbox");
+    // The connected mailbox a message id belongs to.
+    private Account Mailbox(string id) =>
+        _mail.FirstOrDefault(a => a.Id == MailService.ParseId(id).AccountId) ?? throw new ArgumentException("Unknown message id.");
+
+    // One named calendar account, or all of them.
+    private List<Account> Calendars(ToolArguments args) =>
+        args.Optional("account", 40) is { } label ? [Pick(_calendars, label, "calendar account")] : _calendars;
+
+    private async Task<(Account Account, CalendarService.CalendarInfo Target, CalendarService.NewEvent Event)> NewEventAsync(
+        ToolArguments args, CancellationToken ct)
+    {
+        var account = Pick(_calendars, args.Optional("account", 40), "calendar account");
+        var target = await calendar.TargetAsync(account, args.Optional("calendar", 100), ct);
+        var e = CalendarService.ParseEvent(args.Required("title", 200), args.Required("start", 40),
+            args.Required("end", 40), args.Optional("location", 200), args.Optional("notes", 2000));
+        return (account, target, e);
+    }
+
+    // The user approved a specific version of the event; refuse if it has changed since.
+    private static void RequireVersion(CalendarService.Located target, string? fingerprint, string done)
+    {
+        if (fingerprint is not null && (target.ETag ?? "") != fingerprint)
+            throw new ArgumentException($"The event changed after it was shown to you. Nothing was {done}.");
+    }
+
+    private static List<string> CommaList(string? text) =>
+        (text ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    private int ProfileId => profile.Id ?? throw new InvalidOperationException("Needs a profile.");
+
+    // What new_only has reported before, one key per line, and adding this run's items to it.
+    private static async Task<HashSet<string>> SeenAsync(string path, CancellationToken ct) =>
+        File.Exists(path) ? (await File.ReadAllLinesAsync(path, ct)).ToHashSet() : [];
+
+    private static async Task RememberAsync(string path, IEnumerable<string> keys, CancellationToken ct)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.AppendAllLinesAsync(path, keys, ct);
     }
 
     private static string When(DateTime start, DateTime end, bool allDay) => allDay
@@ -333,9 +364,7 @@ public class PersonalTools(
         var title = args.Required("title", 200).Trim();
         var day = ParseLocal(args.Required("date", 40), "date").Date;
         var time = args.Optional("time", 8)?.Trim();
-        List<Account> selected = args.Optional("account", 40) is { } label
-            ? [Pick(_calendars, label, "calendar account")]
-            : _calendars;
+        var selected = Calendars(args);
         if (selected.Count == 0)
             throw new ArgumentException("No calendar is connected. Add one in Settings › Accounts.");
 
@@ -378,8 +407,7 @@ public class PersonalTools(
         var accountIds = ids.Select(id => MailService.ParseId(id).AccountId).Distinct().ToList();
         if (accountIds.Count != 1)
             throw new ArgumentException("Handle one mailbox at a time.");
-        var account = _mail.FirstOrDefault(a => a.Id == accountIds[0]) ?? throw new ArgumentException("Unknown message id.");
-        return (account, ids, action);
+        return (Mailbox(ids[0]), ids, action);
     }
 
     private static MailService.Outgoing Outgoing(ToolArguments args) => new(args.Required("to", 1000),
@@ -396,9 +424,7 @@ public class PersonalTools(
                     : throw new ArgumentException("Give the date like 2026-10-03.");
 
     private static DateTime ParseLocal(string value, string name) =>
-        DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var parsed)
-            ? parsed
-            : throw new ArgumentException($"Invalid {name}. Use a date like 2026-10-02.");
+        CalendarService.ParseLocal(value, name, "a date like 2026-10-02");
 
     private record Expense(string Date, string Merchant, double Amount, string Currency, string Category, string Note);
 
@@ -466,10 +492,7 @@ public class PersonalTools(
                 }
             case "calendar_create":
                 {
-                    var account = Pick(_calendars, args.Optional("account", 40), "calendar account");
-                    var target = await calendar.TargetAsync(account, args.Optional("calendar", 100), ct);
-                    var e = CalendarService.ParseEvent(args.Required("title", 200), args.Required("start", 40),
-                        args.Required("end", 40), args.Optional("location", 200), args.Optional("notes", 2000));
+                    var (account, target, e) = await NewEventAsync(args, ct);
                     return new Proposal(
                         $"{target.Name} · {account.Label}\n{e.Title}\n{e.StartLocal:dddd yyyy-MM-dd HH:mm}–{e.EndLocal:HH:mm}" +
                         (e.Location is null ? "" : $"\n{e.Location}") + (e.Notes is null ? "" : $"\n\n{e.Notes}"), null);
@@ -563,16 +586,12 @@ public class PersonalTools(
             case "mail_read":
                 {
                     var id = args.Required("id", 400);
-                    var (accountId, _, _) = MailService.ParseId(id);
-                    var account = _mail.FirstOrDefault(a => a.Id == accountId) ?? throw new ArgumentException("Unknown message id.");
-                    return new ToolResult(await mail.ReadAsync(account, id, limit, ct), Summary: "Read e-mail");
+                    return new ToolResult(await mail.ReadAsync(Mailbox(id), id, limit, ct), Summary: "Read e-mail");
                 }
             case "mail_attachment":
                 {
                     var id = args.Required("id", 400);
-                    var (accountId, _, _) = MailService.ParseId(id);
-                    var account = _mail.FirstOrDefault(a => a.Id == accountId) ?? throw new ArgumentException("Unknown message id.");
-                    var (name, path) = await mail.SaveAttachmentAsync(account, id, args.Optional("attachment", 200), ct);
+                    var (name, path) = await mail.SaveAttachmentAsync(Mailbox(id), id, args.Optional("attachment", 200), ct);
                     try
                     {
                         var document = DocumentReader.Extract(path);
@@ -610,9 +629,8 @@ public class PersonalTools(
                     if (to <= from)
                         to = from.AddDays(1);
                     var query = args.Optional("query", 100);
-                    var selected = args.Optional("account", 40) is { } label ? [Pick(_calendars, label, "calendar account")] : _calendars;
                     var events = new List<CalendarService.EventInfo>();
-                    foreach (var account in selected)
+                    foreach (var account in Calendars(args))
                         events.AddRange(await calendar.EventsAsync(account, from, to, ct));
                     if (query is not null)
                         events = events.Where(e => e.Title.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -622,18 +640,14 @@ public class PersonalTools(
                 }
             case "calendar_create":
                 {
-                    var account = Pick(_calendars, args.Optional("account", 40), "calendar account");
-                    var target = await calendar.TargetAsync(account, args.Optional("calendar", 100), ct);
-                    var e = CalendarService.ParseEvent(args.Required("title", 200), args.Required("start", 40),
-                        args.Required("end", 40), args.Optional("location", 200), args.Optional("notes", 2000));
+                    var (account, target, e) = await NewEventAsync(args, ct);
                     var text = await calendar.CreateAsync(account, target, e, ct);
                     return new ToolResult(text, Summary: "Added event");
                 }
             case "calendar_update":
                 {
                     var (account, target) = await FindEventAsync(args, ct);
-                    if (fingerprint is not null && (target.ETag ?? "") != fingerprint)
-                        throw new ArgumentException("The event changed after it was shown to you. Nothing was changed.");
+                    RequireVersion(target, fingerprint, "changed");
                     var text = await calendar.UpdateAsync(account, target, ChangeOf(args, target.Occurrence.Event),
                         args.Bool("whole_series"), ct);
                     return new ToolResult(text, Summary: "Changed event");
@@ -641,9 +655,7 @@ public class PersonalTools(
             case "calendar_delete":
                 {
                     var (account, target) = await FindEventAsync(args, ct);
-                    // The user approved a specific version of the event; refuse if it has changed since.
-                    if (fingerprint is not null && (target.ETag ?? "") != fingerprint)
-                        throw new ArgumentException("The event changed after it was shown to you. Nothing was deleted.");
+                    RequireVersion(target, fingerprint, "deleted");
                     var text = await calendar.DeleteAsync(account, target, args.Bool("whole_series"), ct);
                     return new ToolResult(text, Summary: "Deleted event");
                 }
@@ -691,11 +703,9 @@ public class PersonalTools(
                 return await FindJobsAsync(args, ct);
             case "find_activities" when activities is not null:
                 {
-                    static List<string> Items(string? text) =>
-                        (text ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
                     var day = Day(args.Optional("date", 20));
-                    var words = Items(args.Optional("words", 500)) is { Count: > 0 } given ? given : null;
-                    var places = Items(args.Optional("places", 500)) is { Count: > 0 } named ? named : ActivityService.FamilyPlaces.ToList();
+                    var words = CommaList(args.Optional("words", 500)) is { Count: > 0 } given ? given : null;
+                    var places = CommaList(args.Optional("places", 500)) is { Count: > 0 } named ? named : ActivityService.FamilyPlaces.ToList();
                     var found = await activities.ForDayAsync(day, words, places, ct);
                     return new ToolResult(ActivityService.Format(found.Take(30).ToList(), day),
                         Summary: found.Count == 1 ? "1 activity" : $"{found.Count} activities");
@@ -724,66 +734,76 @@ public class PersonalTools(
 
     private async Task<ToolResult> FindJobsAsync(ToolArguments args, CancellationToken ct)
     {
-        static List<string> List(string? text) =>
-            (text ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-        var queries = List(args.Required("queries", 500));
+        var queries = CommaList(args.Required("queries", 500));
         if (queries.Count == 0)
             throw new ArgumentException("Give at least one search word.");
         var newOnly = args.Bool("new_only");
-        var exclude = List(args.Optional("exclude", 1000));
-        var found = new List<JobService.JobAd>(await jobs!.SearchAsync(queries, exclude, ct));
-        var notes = new List<string>();
+        var exclude = CommaList(args.Optional("exclude", 1000));
+        // Platsbanken is searched while the employers' own boards are read, a few at a time.
+        var search = jobs!.SearchAsync(queries, exclude, ct);
+        var lookups = new List<Task<(IReadOnlyList<JobService.JobAd> Ads, string? Note)>>();
+        IReadOnlyList<CareerBoards.Board> discovered = [];
         IReadOnlyCollection<string> watchedNames = [];
+        using var gate = new SemaphoreSlim(6);
+
+        // Each answer keeps its place, and a source that fails becomes a note.
+        async Task<(IReadOnlyList<JobService.JobAd> Ads, string? Note)> Fetch(
+            Func<Task<IReadOnlyList<JobService.JobAd>>> load, string failure)
+        {
+            await gate.WaitAsync(ct);
+            try
+            {
+                return (await load(), null);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException or
+                                           System.Xml.XmlException or TaskCanceledException && !ct.IsCancellationRequested)
+            {
+                return ([], failure);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+
         if (boards is not null && employers is not null)
         {
             // Watched employers' own boards, and with discover boards a web search turns up.
             var list = await employers.ListAsync(ct);
             watchedNames = list.Select(e => e.Name).ToList();
-            foreach (var byName in list.Where(e => e.System == JobEmployers.ByName))
-            {
-                try
-                {
-                    found.AddRange(await jobs.ForEmployerAsync(byName.Name, queries, exclude, ct));
-                }
-                catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException or
-                                               TaskCanceledException && !ct.IsCancellationRequested)
-                {
-                    notes.Add($"Could not search Platsbanken for {byName.Name}.");
-                }
-            }
-
             var watched = list.Where(e => e.System != JobEmployers.ByName)
                 .Select(e => new CareerBoards.Board(e.System, e.Feed, e.Name, e.Url)).ToList();
-            var discovered = args.Bool("discover")
+            discovered = args.Bool("discover")
                 ? await boards.DiscoverAsync(queries, watched.Select(b => b.Feed).ToHashSet(), ct)
                 : [];
-            foreach (var board in watched.Concat(discovered))
-            {
-                try
-                {
-                    found.AddRange((await boards.JobsAsync(board, queries, ct)).Where(a => !JobService.Excluded(a, exclude)));
-                }
-                catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException or
-                                               System.Xml.XmlException or TaskCanceledException && !ct.IsCancellationRequested)
-                {
-                    notes.Add($"Could not read the job board of {board.Name}.");
-                }
-            }
-
-            if (discovered.Count > 0)
-                notes.Add($"Also checked career pages found by web search: {string.Join(", ", discovered.Select(b => b.Name))}.");
+            lookups.AddRange(list.Where(e => e.System == JobEmployers.ByName).Select(e =>
+                Fetch(() => jobs.ForEmployerAsync(e.Name, queries, exclude, ct), $"Could not search Platsbanken for {e.Name}.")));
+            lookups.AddRange(watched.Concat(discovered).Select(board => Fetch(async () =>
+                    (await boards.JobsAsync(board, queries, ct)).Where(a => !JobService.Excluded(a, exclude)).ToList(),
+                $"Could not read the job board of {board.Name}.")));
         }
+
+        var found = new List<JobService.JobAd>(await search);
+        var notes = new List<string>();
+        foreach (var (more, note) in await Task.WhenAll(lookups))
+        {
+            found.AddRange(more);
+            if (note is not null)
+                notes.Add(note);
+        }
+
+        if (discovered.Count > 0)
+            notes.Add($"Also checked career pages found by web search: {string.Join(", ", discovered.Select(b => b.Name))}.");
 
         var ranked = JobService.Distinct(found.OrderByDescending(JobService.Score).ThenByDescending(a => a.Published));
         var ads = (args.Bool("skip_agencies") ? JobService.WithoutAgencies(ranked, watchedNames) : ranked)
             .Take(Math.Clamp(args.Integer("limit", 20), 1, 30)).ToList();
         if (newOnly)
         {
-            var path = personalFiles.SeenJobsPath(profile.Id ?? throw new InvalidOperationException("Needs a profile."));
-            var seen = File.Exists(path) ? (await File.ReadAllLinesAsync(path, ct)).ToHashSet() : [];
+            var path = personalFiles.SeenJobsPath(ProfileId);
+            var seen = await SeenAsync(path, ct);
             ads = ads.Where(a => !seen.Contains(a.Id)).ToList();
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            await File.AppendAllLinesAsync(path, ads.Select(a => a.Id), ct);
+            await RememberAsync(path, ads.Select(a => a.Id), ct);
         }
 
         // No source list: every job card in the reply links to its own ad.
@@ -817,13 +837,12 @@ public class PersonalTools(
         var maybe = ConcertService.ByGenre(upcoming.Where(e => matches.All(m => m.Concert != e)), genres, 5);
         if (newOnly)
         {
-            var path = personalFiles.SeenConcertsPath(profile.Id ?? throw new InvalidOperationException("Needs a profile."));
-            var seen = File.Exists(path) ? (await File.ReadAllLinesAsync(path, ct)).ToHashSet() : [];
+            var path = personalFiles.SeenConcertsPath(ProfileId);
+            var seen = await SeenAsync(path, ct);
             string Key(Concert c) => $"{c.Url}|{c.Start:yyyy-MM-dd}|{c.Title}";
             matches = matches.Where(m => !seen.Contains(Key(m.Concert))).ToList();
             maybe = maybe.Where(m => !seen.Contains(Key(m.Concert))).ToList();
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            await File.AppendAllLinesAsync(path, matches.Select(m => Key(m.Concert)).Concat(maybe.Select(m => Key(m.Concert))), ct);
+            await RememberAsync(path, matches.Select(m => Key(m.Concert)).Concat(maybe.Select(m => Key(m.Concert))), ct);
         }
 
         static string When(Concert c) => c.Start is { } start

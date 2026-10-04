@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
-import { api, send, type ScheduledTask, type Settings, type Watch } from '../api';
+import { useEffect, useRef, useState } from 'react';
+import { api, send, type ScheduledTask, type Settings, type Watch, errorText } from '../api';
 import { Icon } from '../icons';
 import { Dialog } from './Dialog';
+import { ErrorAlert } from './ErrorAlert';
+import { weekdayTime } from '../format';
 
 const dayNames = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const dayLabels = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -34,13 +36,7 @@ const emptyTask: TaskDraft = {
 };
 
 function when(value?: string | null) {
-  return value
-    ? new Date(value).toLocaleString([], {
-        weekday: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-    : '—';
+  return value ? weekdayTime(value) : '—';
 }
 
 function Switch({
@@ -90,6 +86,10 @@ export function AutomationsDialog({
   const [notice, setNotice] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [defaultModel, setDefaultModel] = useState('');
+  // "Run now" answers on the card that was pressed: starting, running, done or why it could not run.
+  const [starting, setStarting] = useState<number | null>(null);
+  const [notes, setNotes] = useState<Record<number, { text: string; failed?: boolean }>>({});
+  const running = useRef(new Set<number>());
 
   async function load() {
     const [t, w, m, s] = await Promise.all([
@@ -100,6 +100,17 @@ export function AutomationsDialog({
     ]);
     setTasks(t);
     setWatches(w);
+    // A run that was going when the list was last read and has ended since is reported on its card.
+    const finished = t.filter((task) => running.current.has(task.id) && !task.runStatus);
+    if (finished.length) {
+      setNotes((previous) => ({
+        ...previous,
+        ...Object.fromEntries(
+          finished.map((task) => [task.id, { text: 'Finished. Open results to see the answer.' }]),
+        ),
+      }));
+    }
+    running.current = new Set(t.filter((task) => task.runStatus).map((task) => task.id));
     setModels(m);
     // What "Default" means right now, as the scheduler resolves it.
     setDefaultModel(s?.defaultModel && m.includes(s.defaultModel) ? s.defaultModel : (m[0] ?? ''));
@@ -114,11 +125,39 @@ export function AutomationsDialog({
     if (open) {
       setError('');
       setNotice('');
+      setNotes({});
       setTask(null);
       setWatch(null);
-      load().catch((e) => setError(String(e)));
+      load().catch((e) => setError(errorText(e)));
     }
   }, [open]);
+
+  // While a task runs, the list is read again every few seconds so its card follows along.
+  const anyRunning = tasks.some((t) => t.runStatus);
+  useEffect(() => {
+    if (!open || !anyRunning) {
+      return;
+    }
+    const timer = window.setInterval(() => void load().catch(() => {}), 3000);
+    return () => window.clearInterval(timer);
+  }, [open, anyRunning]);
+
+  async function runNow(t: ScheduledTask) {
+    setStarting(t.id);
+    setNotes((previous) => {
+      const next = { ...previous };
+      delete next[t.id];
+      return next;
+    });
+    try {
+      await send(`/tasks/${t.id}/run`, 'POST');
+      await load();
+    } catch (e) {
+      setNotes((previous) => ({ ...previous, [t.id]: { text: errorText(e), failed: true } }));
+    } finally {
+      setStarting(null);
+    }
+  }
 
   async function run(action: () => Promise<unknown>, message?: string) {
     setError('');
@@ -130,7 +169,7 @@ export function AutomationsDialog({
       }
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   }
 
@@ -165,11 +204,7 @@ export function AutomationsDialog({
           {notice}
         </p>
       )}
-      {error && (
-        <div role="alert" className="error">
-          {error}
-        </div>
-      )}
+      <ErrorAlert error={error} />
       {tab === 'tasks' ? (
         <section className="automation-list" aria-label="Scheduled tasks">
           {tasks.map((t) => (
@@ -191,25 +226,46 @@ export function AutomationsDialog({
                 />
               </div>
               <p className="automation-prompt">{t.prompt}</p>
+              {t.runStatus === 'awaiting_approval' ? (
+                <p className="automation-status waiting" role="status">
+                  Waiting for your approval. Open it to approve or decline.
+                </p>
+              ) : t.runStatus ? (
+                <p className="automation-status" role="status">
+                  <span className="pulse" />
+                  Running now. You'll get a notification when it is done.
+                </p>
+              ) : (
+                notes[t.id] && (
+                  <p
+                    className={
+                      notes[t.id].failed ? 'automation-status failed' : 'automation-status done'
+                    }
+                    role={notes[t.id].failed ? 'alert' : 'status'}
+                  >
+                    {notes[t.id].text}
+                  </p>
+                )
+              )}
               <div className="automation-actions">
                 <button
                   className="secondary small"
-                  onClick={() =>
-                    void run(
-                      () => send(`/tasks/${t.id}/run`, 'POST'),
-                      `${t.name} is running. You'll get a notification.`,
-                    )
-                  }
+                  disabled={starting === t.id || !!t.runStatus}
+                  onClick={() => void runNow(t)}
                 >
                   <Icon name="play" size={14} />
-                  Run now
+                  {starting === t.id ? 'Starting…' : t.runStatus ? 'Running…' : 'Run now'}
                 </button>
                 {t.conversationId && (
                   <button
-                    className="secondary small"
+                    className={t.runStatus ? 'primary small' : 'secondary small'}
                     onClick={() => onOpenConversation(t.conversationId!)}
                   >
-                    Open results
+                    {t.runStatus === 'awaiting_approval'
+                      ? 'Open to approve'
+                      : t.runStatus
+                        ? 'Follow along'
+                        : 'Open results'}
                   </button>
                 )}
                 <button className="secondary small" onClick={() => setTask({ ...t })}>

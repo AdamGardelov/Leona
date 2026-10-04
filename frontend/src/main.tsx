@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
 import { App } from './App';
-import { api, type Session } from './api';
+import { api, type Session, errorText } from './api';
 import { PairScreen } from './components/PairScreen';
 import { registerServiceWorker } from './components/NotificationsDialog';
 import { followSystemTextSize } from './textSize';
@@ -15,7 +15,7 @@ function Root() {
   useEffect(() => {
     api<Session>('/session')
       .then(setSession)
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(errorText(e)));
   }, []);
 
   if (error) {

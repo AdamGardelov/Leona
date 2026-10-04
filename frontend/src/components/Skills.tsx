@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { api, send, type Skill, type SkillInput } from '../api';
+import { api, send, type Skill, type SkillInput, errorText } from '../api';
 import { Icon } from '../icons';
 import { Dialog } from './Dialog';
+import { ErrorAlert } from './ErrorAlert';
+import { Field } from './Field';
 
 const empty: SkillInput = { name: '', whenToUse: '', steps: '' };
 
@@ -14,17 +16,19 @@ function SkillFields({
 }) {
   return (
     <>
-      <div className="field">
-        <label htmlFor="skill-name">Name</label>
+      <Field id="skill-name" label="Name">
         <input
           id="skill-name"
           maxLength={60}
           value={value.name}
           onChange={(e) => onChange({ ...value, name: e.target.value })}
         />
-      </div>
-      <div className="field">
-        <label htmlFor="skill-when">When to use it</label>
+      </Field>
+      <Field
+        id="skill-when"
+        label="When to use it"
+        hint="Leona uses the skill when a request shares words with its name and this sentence."
+      >
         <input
           id="skill-when"
           maxLength={300}
@@ -33,12 +37,8 @@ function SkillFields({
           placeholder="For example: When I ask for my weekly work report"
           onChange={(e) => onChange({ ...value, whenToUse: e.target.value })}
         />
-        <p className="hint" id="skill-when-hint">
-          Leona uses the skill when a request shares words with its name and this sentence.
-        </p>
-      </div>
-      <div className="field">
-        <label htmlFor="skill-steps">Steps</label>
+      </Field>
+      <Field id="skill-steps" label="Steps">
         <textarea
           id="skill-steps"
           rows={7}
@@ -46,7 +46,7 @@ function SkillFields({
           value={value.steps}
           onChange={(e) => onChange({ ...value, steps: e.target.value })}
         />
-      </div>
+      </Field>
     </>
   );
 }
@@ -81,7 +81,7 @@ export function SkillDialog({
     setDrafting(true);
     send<SkillInput>('/skills/draft', 'POST', { conversationId, model })
       .then(setValue)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setError(errorText(e)))
       .finally(() => setDrafting(false));
   }, [open, conversationId]);
 
@@ -92,7 +92,7 @@ export function SkillDialog({
       await send('/skills', 'POST', value);
       onClose(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }
@@ -120,11 +120,7 @@ export function SkillDialog({
           <SkillFields value={value} onChange={setValue} />
         </form>
       )}
-      {error && (
-        <div role="alert" className="error">
-          {error}
-        </div>
-      )}
+      <ErrorAlert error={error} />
       <div className="dialog-actions">
         <button type="button" className="secondary" onClick={() => onClose(false)}>
           Cancel
@@ -155,7 +151,7 @@ export function SkillsSection({ open }: { open: boolean }) {
     if (open) {
       setEditing(null);
       setError('');
-      load().catch((e) => setError(String(e)));
+      load().catch((e) => setError(errorText(e)));
     }
   }, [open]);
 
@@ -173,7 +169,7 @@ export function SkillsSection({ open }: { open: boolean }) {
       setEditing(null);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   }
 
@@ -185,7 +181,7 @@ export function SkillsSection({ open }: { open: boolean }) {
       await send(`/skills/${skill.id}`, 'DELETE');
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   }
 
@@ -251,11 +247,7 @@ export function SkillsSection({ open }: { open: boolean }) {
           New skill
         </button>
       )}
-      {error && (
-        <div role="alert" className="error">
-          {error}
-        </div>
-      )}
+      <ErrorAlert error={error} />
     </section>
   );
 }

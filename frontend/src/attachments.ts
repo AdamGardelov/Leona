@@ -1,4 +1,4 @@
-import type { AttachmentRef } from './api';
+import { send, type AttachmentRef } from './api';
 
 export type PendingAttachment = {
   key: string;
@@ -12,6 +12,11 @@ export type PendingAttachment = {
 };
 
 export const documentTypes = '.pdf,.docx,.txt,.md,.csv,.json,.log';
+
+// The short type label on a document chip, such as PDF or DOCX.
+export function docBadge(name: string) {
+  return name.split('.').pop()?.slice(0, 4).toUpperCase();
+}
 const maxImageSide = 1600;
 
 // Photos are scaled down and re-encoded as JPEG in the browser: smaller uploads, fewer image
@@ -64,10 +69,5 @@ export async function uploadFile(file: File): Promise<{ ref: AttachmentRef; prev
   }
   const form = new FormData();
   form.append('file', body, name);
-  const response = await fetch('/api/uploads', { method: 'POST', body: form });
-  const data = await response.json().catch(() => undefined);
-  if (!response.ok) {
-    throw new Error(data?.error ?? `Upload failed (${response.status}).`);
-  }
-  return { ref: data as AttachmentRef, previewUrl };
+  return { ref: await send<AttachmentRef>('/uploads', 'POST', form), previewUrl };
 }

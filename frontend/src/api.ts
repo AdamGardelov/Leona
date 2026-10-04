@@ -147,6 +147,8 @@ export type ScheduledTask = {
   lastRunAt?: string | null;
   schedule: string;
   nextRun?: string | null;
+  // Set while a run is going in the task's chat.
+  runStatus?: 'queued' | 'running' | 'awaiting_approval' | null;
 };
 export type Watch = {
   id: number;
@@ -203,21 +205,41 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json();
 }
 
-// Sends JSON and surfaces the backend's own error text when it gives one.
+// A failed request, with the backend's own error text when it gave one.
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+// Sends JSON, or a form or recording as it is, and returns the JSON answer.
 export async function send<T>(path: string, method: string, body?: unknown): Promise<T> {
+  const raw = body instanceof FormData || body instanceof Blob;
   const response = await fetch('/api' + path, {
     method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    headers: body === undefined || raw ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
   });
   const text = await response.text();
-  const data = text ? JSON.parse(text) : undefined;
+  let data;
+  try {
+    data = text ? JSON.parse(text) : undefined;
+  } catch {
+    data = undefined;
+  }
   if (!response.ok) {
     const message =
       data?.error ?? (Array.isArray(data?.errors) ? data.errors.join(' ') : undefined);
-    throw new Error(message ?? `Request failed (${response.status}).`);
+    throw new ApiError(message ?? `Request failed (${response.status}).`, response.status);
   }
   return data as T;
+}
+
+export function errorText(e: unknown) {
+  return e instanceof Error ? e.message : String(e);
 }
 
 // History stores tool arguments as an excerpt of their JSON; fall back to an empty object.
@@ -236,10 +258,20 @@ export function parseArguments(raw: unknown): Record<string, unknown> {
   return {};
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+// A stored object is laid over the fallback, so a preference added later still gets its default; other
+// values (a model name, a list) are returned as stored.
 export function readStorage<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
-    return raw === null ? fallback : { ...fallback, ...JSON.parse(raw) };
+    if (raw === null) {
+      return fallback;
+    }
+    const stored: unknown = JSON.parse(raw);
+    return (isRecord(fallback) && isRecord(stored) ? { ...fallback, ...stored } : stored) as T;
   } catch {
     return fallback;
   }

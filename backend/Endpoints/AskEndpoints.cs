@@ -81,7 +81,7 @@ public static partial class AskEndpoints
             await Task.Delay(500, ct);
             var status = await db.Runs.AsNoTracking().Where(r => r.Id == run.Id).Select(r => r.Status).FirstAsync(ct);
             if (status == RunStatus.Completed)
-                return Results.Text(SpokenText.From(await AnswerAsync(db, conversationId, ct)));
+                return Results.Text(SpokenText.From(await ConversationService.LatestReplyAsync(db, conversationId, ct)));
             if (status == RunStatus.AwaitingApproval)
             {
                 await notifications.NotifyAsync(profileId, "Leona needs your approval",
@@ -129,10 +129,6 @@ public static partial class AskEndpoints
     [GeneratedRegex(@"^(hej|hey|hallå)?[\s,]*(siri)?[\s,]*(fråga|ask)?\s*leona\b[\s,.:!?]*", RegexOptions.IgnoreCase)]
     private static partial Regex Address();
 
-    private static async Task<string> AnswerAsync(ChatDb db, int conversationId, CancellationToken ct) =>
-        await db.Messages.AsNoTracking().Where(m => m.ConversationId == conversationId && m.Role == "assistant")
-            .OrderByDescending(m => m.Id).Select(m => m.Content).FirstOrDefaultAsync(ct) ?? "";
-
     private static async Task NotifyWhenDoneAsync(IServiceScopeFactory scopes, NotificationService notifications,
         int profileId, Guid runId, int conversationId, string link)
     {
@@ -145,7 +141,7 @@ public static partial class AskEndpoints
             if (status is null || RunStatus.IsActive(status))
                 continue;
 
-            var answer = status == RunStatus.Completed ? SpokenText.From(await AnswerAsync(db, conversationId, default)) : "";
+            var answer = status == RunStatus.Completed ? SpokenText.From(await ConversationService.LatestReplyAsync(db, conversationId, default)) : "";
             await notifications.NotifyAsync(profileId, "Leona",
                 answer.Length > 0 ? ContextBudget.Excerpt(answer, 300) : "Open the chat for details.", link, default);
             return;

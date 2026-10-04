@@ -117,10 +117,14 @@ public sealed class UploadStore(IHostEnvironment environment, IConfiguration con
     {
         var cutoff = DateTime.UtcNow.AddDays(-1);
         var old = await db.Uploads.Where(u => u.CreatedAt < cutoff).ToListAsync(ct);
+        // The uploads messages refer to, read once rather than searched for per upload.
+        var referenced = old.Count == 0
+            ? []
+            : (await db.Messages.AsNoTracking().Where(m => m.AttachmentsJson != "[]").Select(m => m.AttachmentsJson)
+                .ToListAsync(ct)).SelectMany(ChatService.AttachmentsOf).Select(a => a.Id).ToHashSet();
         foreach (var upload in old)
         {
-            var id = upload.Id.ToString();
-            if (await db.Messages.AnyAsync(m => m.AttachmentsJson.Contains(id), ct))
+            if (referenced.Contains(upload.Id))
                 continue;
             db.Uploads.Remove(upload);
             DeleteFolder(Path.Combine(RootFor(upload.ProfileId), upload.Id.ToString("N")));

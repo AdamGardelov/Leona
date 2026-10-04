@@ -15,7 +15,7 @@ public partial class MemoryService(ChatDb db)
 
     public async Task<Memory> SaveAsync(string text, CancellationToken ct)
     {
-        text = Regex.Replace(text.Trim(), @"\s+", " ");
+        text = TextMatch.Collapse(text);
         if (text.Length is 0 or > MaxLength)
             throw new ArgumentException($"A memory must be 1–{MaxLength} characters.");
         var existing = await db.Memories.FirstOrDefaultAsync(m => m.Text == text, ct);

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { api, send, type Profile } from '../api';
+import { api, send, type Profile, errorText } from '../api';
 import { Icon } from '../icons';
+import { ErrorAlert } from './ErrorAlert';
 
 // Managed only on the computer: one profile per person, each with their own chats, accounts and
 // notifications. Removing a profile deletes everything in it.
@@ -17,7 +18,7 @@ export function ProfilesSection({ open, current }: { open: boolean; current: Pro
     if (open) {
       setEditing(null);
       setError('');
-      load().catch((e) => setError(String(e)));
+      load().catch((e) => setError(errorText(e)));
     }
   }, [open]);
 
@@ -35,7 +36,7 @@ export function ProfilesSection({ open, current }: { open: boolean; current: Pro
       setEditing(null);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   }
 
@@ -52,7 +53,7 @@ export function ProfilesSection({ open, current }: { open: boolean; current: Pro
       await send(`/profiles/${profile.id}`, 'DELETE');
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   }
 
@@ -131,11 +132,7 @@ export function ProfilesSection({ open, current }: { open: boolean; current: Pro
           Add profile
         </button>
       )}
-      {error && (
-        <div role="alert" className="error">
-          {error}
-        </div>
-      )}
+      <ErrorAlert error={error} />
     </section>
   );
 }

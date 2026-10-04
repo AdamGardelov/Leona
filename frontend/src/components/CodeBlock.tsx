@@ -147,41 +147,83 @@ const jobKeys: Record<string, string> = {
   annons: 'link',
 };
 
-function JobCard({ text }: { text: string }) {
-  const job: Record<string, string> = {};
+// The "Key: value" lines of a card block, named by a key table; the first line for a name wins.
+function parseFields(text: string, keys: Record<string, string>) {
+  const fields: Record<string, string> = {};
   for (const line of text.split('\n')) {
     const match = line.match(/^\s*([\p{L} ]+?)\s*:\s*(.+)$/u);
-    const key = match && jobKeys[match[1].toLowerCase()];
-    if (match && key && !job[key]) {
-      job[key] = match[2].trim();
+    const key = match && keys[match[1].toLowerCase()];
+    if (match && key && !fields[key]) {
+      fields[key] = match[2].trim();
     }
   }
-  const link = job.link?.match(/https?:\/\/\S+/)?.[0].replace(/[)>.,]+$/, '');
+  return fields;
+}
+
+// The first address in a field, without punctuation the model put after it.
+function firstLink(value?: string) {
+  return value?.match(/https?:\/\/\S+/)?.[0].replace(/[)>.,]+$/, '');
+}
+
+function FieldCard({
+  title,
+  subtitle,
+  tags,
+  why,
+  status,
+  link,
+  linkLabel,
+}: {
+  title: string;
+  subtitle?: string;
+  tags: (string | undefined)[];
+  why?: string;
+  status?: string;
+  link?: string;
+  linkLabel: string;
+}) {
+  const shown = tags.filter((tag): tag is string => !!tag);
   return (
     <figure className="job-card">
       <figcaption>
-        <b>{job.role ?? 'Job'}</b>
-        {job.company && <span>{job.company}</span>}
+        <b>{title}</b>
+        {subtitle && <span>{subtitle}</span>}
       </figcaption>
-      {(job.place || job.level) && (
+      {shown.length > 0 && (
         <div className="job-tags">
-          {job.place && <span>{job.place}</span>}
-          {job.level && <span>{job.level}</span>}
+          {shown.map((tag) => (
+            <span key={tag}>{tag}</span>
+          ))}
         </div>
       )}
-      {job.why && <p className="job-why">{job.why}</p>}
-      {(job.status || link) && (
+      {why && <p className="job-why">{why}</p>}
+      {(status || link) && (
         <div className="job-foot">
-          {job.status && <span className="job-status">{job.status}</span>}
+          <span className="job-status">{status}</span>
           {link && (
             <a className="job-link" href={link} target="_blank" rel="noopener noreferrer">
-              Open the ad
+              {linkLabel}
               <Icon name="arrowRight" size={14} />
             </a>
           )}
         </div>
       )}
     </figure>
+  );
+}
+
+function JobCard({ text }: { text: string }) {
+  const job = parseFields(text, jobKeys);
+  return (
+    <FieldCard
+      title={job.role ?? 'Job'}
+      subtitle={job.company}
+      tags={[job.place, job.level]}
+      why={job.why}
+      status={job.status}
+      link={firstLink(job.link)}
+      linkLabel="Open the ad"
+    />
   );
 }
 
@@ -209,40 +251,16 @@ const activityKeys: Record<string, string> = {
 };
 
 function ActivityCard({ text }: { text: string }) {
-  const item: Record<string, string> = {};
-  for (const line of text.split('\n')) {
-    const match = line.match(/^\s*([\p{L} ]+?)\s*:\s*(.+)$/u);
-    const key = match && activityKeys[match[1].toLowerCase()];
-    if (match && key && !item[key]) {
-      item[key] = match[2].trim();
-    }
-  }
-  const link = item.link?.match(/https?:\/\/\S+/)?.[0].replace(/[)>.,]+$/, '');
-  const tags = [item.time, item.age, item.cost].filter(Boolean);
+  const item = parseFields(text, activityKeys);
   return (
-    <figure className="job-card">
-      <figcaption>
-        <b>{item.title ?? 'Suggestion'}</b>
-        {item.place && <span>{item.place}</span>}
-      </figcaption>
-      {tags.length > 0 && (
-        <div className="job-tags">
-          {tags.map((tag) => (
-            <span key={tag}>{tag}</span>
-          ))}
-        </div>
-      )}
-      {item.why && <p className="job-why">{item.why}</p>}
-      {link && (
-        <div className="job-foot">
-          <span className="job-status" />
-          <a className="job-link" href={link} target="_blank" rel="noopener noreferrer">
-            Read more
-            <Icon name="arrowRight" size={14} />
-          </a>
-        </div>
-      )}
-    </figure>
+    <FieldCard
+      title={item.title ?? 'Suggestion'}
+      subtitle={item.place}
+      tags={[item.time, item.age, item.cost]}
+      why={item.why}
+      link={firstLink(item.link)}
+      linkLabel="Read more"
+    />
   );
 }
 

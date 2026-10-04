@@ -112,15 +112,15 @@ public sealed partial class SchedulerService(
                     continue;
                 if (status == RunStatus.Completed)
                 {
-                    var events = await db.RunEvents.Where(e => e.RunId == runId).Select(e => e.Json).ToListAsync(ct);
+                    var events = await db.RunEvents.Where(e => e.RunId == runId && e.Json.Contains("\"tool_finished\""))
+                        .Select(e => e.Json).ToListAsync(ct);
                     if (NothingNew(events))
                     {
                         logger.LogInformation("{Task} found nothing new; no notification", name);
                         return;
                     }
 
-                    var answer = await db.Messages.Where(m => m.ConversationId == conversationId && m.Role == "assistant")
-                        .OrderByDescending(m => m.Id).Select(m => m.Content).FirstOrDefaultAsync(ct) ?? "";
+                    var answer = await ConversationService.LatestReplyAsync(db, conversationId, ct);
                     if (SaysNothingNew(answer))
                     {
                         logger.LogInformation("{Task} answered that nothing is new; no notification", name);
@@ -177,26 +177,27 @@ public sealed partial class SchedulerService(
     {
         var text = markdown.Split("\n### Sources")[0];
         // A job card becomes one line: role, employer and place.
-        text = JobBlock().Replace(text, block =>
+        text = JobBlock().Replace(text, match =>
         {
-            string Field(params string[] keys) => keys.Select(key =>
-                Regex.Match(block.Groups[1].Value, $@"^\s*{key}\s*:\s*(.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase))
-                .FirstOrDefault(m => m.Success)?.Groups[1].Value.Trim() ?? "";
-            var place = Field("Ort", "Place", "Plats");
-            return $"• {Field("Roll", "Role")} – {Field("Företag", "Company")}{(place.Length > 0 ? $" ({place})" : "")}\n";
+            var block = match.Groups[1].Value;
+            var place = Field(block, "Ort", "Place", "Plats");
+            return $"• {Field(block, "Roll", "Role")} – {Field(block, "Företag", "Arbetsgivare", "Company")}{(place.Length > 0 ? $" ({place})" : "")}\n";
         });
         // A day plan's suggestion becomes one line too: what, where and when.
-        text = ActivityBlock().Replace(text, block =>
+        text = ActivityBlock().Replace(text, match =>
         {
-            string Field(params string[] keys) => keys.Select(key =>
-                Regex.Match(block.Groups[1].Value, $@"^\s*{key}\s*:\s*(.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase))
-                .FirstOrDefault(m => m.Success)?.Groups[1].Value.Trim() ?? "";
-            var time = Field("Tid", "Time");
-            return $"• {Field("Vad", "Aktivitet", "What")} – {Field("Plats", "Place")}{(time.Length > 0 ? $" ({time})" : "")}\n";
+            var block = match.Groups[1].Value;
+            var time = Field(block, "Tid", "Time");
+            return $"• {Field(block, "Vad", "Aktivitet", "What", "Title")} – {Field(block, "Plats", "Place")}{(time.Length > 0 ? $" ({time})" : "")}\n";
         });
         text = MarkdownSyntax().Replace(text, "");
         return Regex.Replace(text, @"\n{2,}", "\n").Trim();
     }
+
+    // The first "Key: value" line of a card block for any of the keys.
+    private static string Field(string block, params string[] keys) => keys.Select(key =>
+            Regex.Match(block, $@"^\s*{key}\s*:\s*(.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase))
+        .FirstOrDefault(m => m.Success)?.Groups[1].Value.Trim() ?? "";
 
     [GeneratedRegex(@"(^#+\s*|\*\*|__|`|^\s*[-*]\s+(?=\S))", RegexOptions.Multiline)]
     private static partial Regex MarkdownSyntax();

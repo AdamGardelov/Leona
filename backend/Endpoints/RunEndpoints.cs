@@ -16,7 +16,7 @@ public static class RunEndpoints
     public static void MapRunEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/runs");
-        group.MapPost("", CreateAsync);
+        group.MapPost("", CreateAsync).WithInputErrors();
         group.MapGet("/active", ActiveAsync);
         group.MapGet("/{id:guid}", GetAsync);
         group.MapGet("/{id:guid}/events", EventsAsync);
@@ -39,21 +39,11 @@ public static class RunEndpoints
         if (request.Input is null || request.Input.Text is null || (string.IsNullOrWhiteSpace(request.Input.Text) && !hasAttachments) ||
             request.Input.Text.Length > 12000 || string.IsNullOrWhiteSpace(request.Input.Model))
             return Results.BadRequest();
-        try
-        {
-            var run = await runs.CreateAsync(profile.Id!.Value, request.ConversationId,
-                request.Input with { Background = false, Scheduled = false }, request.RewindFromMessageId);
-            return run is null ? Results.Conflict(new { error = "This conversation already has an active run." })
-                : Results.Accepted($"/api/runs/{run.Id}", View(run));
-        }
-        catch (KeyNotFoundException)
-        {
-            return Results.NotFound();
-        }
-        catch (ArgumentException ex)
-        {
-            return Results.BadRequest(new { error = ex.Message });
-        }
+        var run = await runs.CreateAsync(profile.Id!.Value, request.ConversationId,
+            request.Input with { Background = false, Scheduled = false }, request.RewindFromMessageId);
+        return run is null
+            ? Results.Conflict(new { error = "This conversation already has an active run." })
+            : Results.Accepted($"/api/runs/{run.Id}", View(run));
     }
     private static async Task<IResult> ActiveAsync(ChatDb db, CancellationToken ct)
     {

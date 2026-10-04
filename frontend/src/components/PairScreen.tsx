@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { send } from '../api';
+import { send, errorText } from '../api';
 import { Mark } from '../icons';
+import { ErrorAlert } from './ErrorAlert';
 
 // Shown on other devices until they are paired with a code from the computer.
 export function PairScreen() {
@@ -18,7 +19,7 @@ export function PairScreen() {
       await send('/pair', 'POST', { code: code.trim() });
       window.location.replace('/');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
       setBusy(false);
     }
   }
@@ -52,11 +53,7 @@ export function PairScreen() {
           Pair
         </button>
       </form>
-      {error && (
-        <div role="alert" className="error">
-          {error}
-        </div>
-      )}
+      <ErrorAlert error={error} />
     </main>
   );
 }

@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { api, send, type Profile, type Settings } from '../api';
+import { useEffect, useState } from 'react';
+import { api, send, type Profile, type Settings, errorText } from '../api';
 import { Dialog } from './Dialog';
+import { Field } from './Field';
 import {
   FoldersSection,
   JobRadarSection,
@@ -12,6 +13,7 @@ import { PhoneSection } from './PhoneSection';
 import { AccountsSection } from './AccountsSection';
 import { ProfilesSection } from './ProfilesSection';
 import { SkillsSection } from './Skills';
+import { ErrorAlert } from './ErrorAlert';
 
 type NumberKey = { [K in keyof Settings]: Settings[K] extends number ? K : never }[keyof Settings];
 
@@ -22,30 +24,6 @@ const keepAliveOptions = [
   { value: '2h', label: '2 hours' },
   { value: '-1', label: 'Until Ollama stops' },
 ];
-
-function Field({
-  id,
-  label,
-  hint,
-  children,
-}: {
-  id: string;
-  label: string;
-  hint?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="field">
-      <label htmlFor={id}>{label}</label>
-      {children}
-      {hint && (
-        <p className="hint" id={`${id}-hint`}>
-          {hint}
-        </p>
-      )}
-    </div>
-  );
-}
 
 export function SettingsDialog({
   open,
@@ -79,7 +57,7 @@ export function SettingsDialog({
     setErrors('');
     api<Settings>('/settings')
       .then(setSettings)
-      .catch((e) => setErrors(String(e)));
+      .catch((e) => setErrors(errorText(e)));
     setModels(null);
     api<string[]>('/models')
       .then(setModels)
@@ -105,7 +83,7 @@ export function SettingsDialog({
       onSaved?.();
       onClose();
     } catch (e) {
-      setErrors(e instanceof Error ? e.message : String(e));
+      setErrors(errorText(e));
     } finally {
       setSaving(false);
     }
@@ -299,11 +277,7 @@ export function SettingsDialog({
           <SiriSection open={open} />
           <JobRadarSection open={open} />
           {local && <PhoneSection open={open} current={profile} />}
-          {errors && (
-            <div role="alert" className="error">
-              {errors}
-            </div>
-          )}
+          <ErrorAlert error={errors} />
           <div className="dialog-actions">
             <button type="button" className="secondary" onClick={onClose}>
               Cancel

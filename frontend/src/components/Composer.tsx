@@ -1,8 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { Approval } from '../api';
-import { describeSize, documentTypes, type PendingAttachment } from '../attachments';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { errorText, type Approval } from '../api';
+import { describeSize, docBadge, documentTypes, type PendingAttachment } from '../attachments';
 import { Icon, type IconName } from '../icons';
+import { describeStep } from '../steps';
 import { record, stopSpeaking, transcribe, unlockSpeech, type Recording } from '../voice';
+import { ErrorAlert } from './ErrorAlert';
+import { clock } from '../format';
 
 export type Toggle = {
   label: string;
@@ -49,9 +52,61 @@ function DiffPreview({ diff }: { diff: string }) {
   );
 }
 
+type ApprovalView = {
+  icon: IconName;
+  title: string;
+  target: string;
+  facts: string[];
+  body: ReactNode;
+  // The approve button's label; "Approve once" when not given.
+  approve?: string;
+};
+
+type ApprovalCopy = { title: string; facts: string[]; approve?: string; icon?: IconName };
+
+// The tools whose preview the backend builds (message, event, row, schedule, address or memory). The
+// icon is the tool step's own unless given.
+const approvalCopy: Record<string, ApprovalCopy> = {
+  read_page: {
+    title: 'Open this page?',
+    facts: ['Asked because this chat read untrusted content'],
+  },
+  save_memory: { title: 'Remember this?', facts: ['Used in future chats'] },
+  save_skill: {
+    title: 'Save this skill?',
+    facts: ['Used for similar requests', 'Edit it under Settings › Skills'],
+  },
+  mail_send: { title: 'Send this e-mail?', facts: ['Sent now from your mailbox'], approve: 'Send' },
+  calendar_create: { title: 'Add this event?', facts: ['Added to your calendar'] },
+  calendar_update: {
+    title: 'Change this event?',
+    facts: ['Updated in your calendar', 'Refused if the event changed first'],
+    approve: 'Save change',
+  },
+  mail_manage: { title: 'Change these e-mails?', facts: ['Done in your mailbox'] },
+  calendar_delete: {
+    title: 'Delete this event?',
+    facts: ['Removed from your calendar', 'Refused if the event changed first'],
+    approve: 'Delete',
+  },
+  home_action: { title: 'Control this device?', facts: ['Runs in Home Assistant'] },
+  record_expense: { title: 'Add this expense?', facts: ['Appended to the spreadsheet'] },
+  schedule_task: { title: 'Create this schedule?', facts: ['You can turn it off in Automations'] },
+  watch_page: { title: 'Watch this page?', facts: ['You can stop it in Automations'] },
+};
+
+// Deleting mail only moves it to the trash, and says so.
+const trashCopy: ApprovalCopy = {
+  title: 'Move to trash?',
+  facts: ['Can be restored from the trash'],
+  approve: 'Move to trash',
+  icon: 'trash',
+};
+
 // What the user is approving, per tool. Unknown tools fall back to their raw arguments.
-function describeApproval(approval: Approval) {
+function describeApproval(approval: Approval): ApprovalView {
   const args = approval.arguments;
+  const icon = describeStep(approval.toolName, args, 'awaiting_approval').icon;
   const path = String(args.path ?? '');
   const folder = args.folder ? `${String(args.folder)}/` : '';
   switch (approval.toolName) {
@@ -59,7 +114,7 @@ function describeApproval(approval: Approval) {
       const content = String(args.content ?? '');
       const lines = content.split('\n').length;
       return {
-        icon: 'filePlus' as IconName,
+        icon,
         title: 'Leona wants to create a file',
         target: folder + path,
         facts: [
@@ -72,7 +127,7 @@ function describeApproval(approval: Approval) {
     }
     case 'edit_file':
       return {
-        icon: 'pencil' as IconName,
+        icon,
         title: 'Leona wants to edit a file',
         target: folder + path,
         facts: ['Replaces exactly the text shown', 'Refused if the file changes first'],
@@ -81,94 +136,29 @@ function describeApproval(approval: Approval) {
     case 'run_command': {
       const [where, ...rest] = (approval.preview ?? '').split('\n');
       return {
-        icon: 'terminal' as IconName,
+        icon,
         title: 'Leona wants to run a command',
         target: where,
         facts: ['Runs as you, never with sudo', rest[rest.length - 1] ?? ''].filter(Boolean),
         body: <pre className="approval-preview command">{String(args.command ?? '')}</pre>,
+        approve: 'Run once',
       };
     }
     default: {
-      // The backend builds the exact preview (message, event, row, schedule, address or memory).
-      const personal: Record<string, { icon: IconName; title: string; facts: string[] }> = {
-        read_page: {
-          icon: 'globe',
-          title: 'Open this page?',
-          facts: ['Asked because this chat read untrusted content'],
-        },
-        save_memory: {
-          icon: 'bookmark',
-          title: 'Remember this?',
-          facts: ['Used in future chats'],
-        },
-        save_skill: {
-          icon: 'bolt',
-          title: 'Save this skill?',
-          facts: ['Used for similar requests', 'Edit it under Settings › Skills'],
-        },
-        mail_send: {
-          icon: 'mail',
-          title: 'Send this e-mail?',
-          facts: ['Sent now from your mailbox'],
-        },
-        calendar_create: {
-          icon: 'calendarPlus',
-          title: 'Add this event?',
-          facts: ['Added to your calendar'],
-        },
-        calendar_update: {
-          icon: 'calendar',
-          title: 'Change this event?',
-          facts: ['Updated in your calendar', 'Refused if the event changed first'],
-        },
-        mail_manage: {
-          icon: 'mail',
-          title: 'Change these e-mails?',
-          facts: ['Done in your mailbox'],
-        },
-        calendar_delete: {
-          icon: 'trash',
-          title: 'Delete this event?',
-          facts: ['Removed from your calendar', 'Refused if the event changed first'],
-        },
-        home_action: {
-          icon: 'home',
-          title: 'Control this device?',
-          facts: ['Runs in Home Assistant'],
-        },
-        record_expense: {
-          icon: 'receipt',
-          title: 'Add this expense?',
-          facts: ['Appended to the spreadsheet'],
-        },
-        schedule_task: {
-          icon: 'clock',
-          title: 'Create this schedule?',
-          facts: ['You can turn it off in Automations'],
-        },
-        watch_page: {
-          icon: 'eye',
-          title: 'Watch this page?',
-          facts: ['You can stop it in Automations'],
-        },
-      };
       const known =
-        approval.toolName === 'mail_manage' && approval.arguments.action === 'delete'
-          ? {
-              icon: 'trash' as IconName,
-              title: 'Move to trash?',
-              facts: ['Can be restored from the trash'],
-            }
-          : personal[approval.toolName];
+        approval.toolName === 'mail_manage' && args.action === 'delete'
+          ? trashCopy
+          : approvalCopy[approval.toolName];
       if (known && approval.preview) {
         return {
           ...known,
+          icon: known.icon ?? icon,
           target: '',
           body: <pre className="approval-preview personal">{approval.preview}</pre>,
         };
       }
       return {
-        icon: 'alert' as IconName,
+        icon: 'alert',
         title: `Leona wants to use ${approval.toolName}`,
         target: '',
         facts: [],
@@ -221,11 +211,7 @@ function ApprovalCard({
       <div className="approval-actions">
         <span>
           Single-use approval
-          {approval.expiresAt &&
-            ` · expires ${new Date(approval.expiresAt).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            })}`}
+          {approval.expiresAt && ` · expires ${clock(approval.expiresAt)}`}
         </span>
         <button
           type="button"
@@ -253,17 +239,7 @@ function ApprovalCard({
           onClick={() => onDecide(true)}
         >
           <Icon name="check" />
-          {approval.toolName === 'run_command'
-            ? 'Run once'
-            : approval.toolName === 'mail_send'
-              ? 'Send'
-              : approval.toolName === 'calendar_delete'
-                ? 'Delete'
-                : approval.toolName === 'mail_manage' && approval.arguments.action === 'delete'
-                  ? 'Move to trash'
-                  : approval.toolName === 'calendar_update'
-                    ? 'Save change'
-                    : 'Approve once'}
+          {view.approve ?? 'Approve once'}
         </button>
       </div>
     </section>
@@ -282,11 +258,47 @@ type AttachSheetProps = {
 };
 
 // Phones: one sheet for the camera, photos, files, the model and this message's tools.
-export function AttachSheet(props: AttachSheetProps) {
-  const camera = useRef<HTMLInputElement>(null);
-  const photos = useRef<HTMLInputElement>(null);
-  const files = useRef<HTMLInputElement>(null);
+// Where a file can come from on a phone; each opens its own picker.
+const attachSources: {
+  icon: IconName;
+  label: string;
+  accept: string;
+  capture?: 'environment';
+  multiple?: boolean;
+}[] = [
+  { icon: 'camera', label: 'Camera', accept: 'image/*', capture: 'environment' },
+  { icon: 'image', label: 'Photos', accept: 'image/*', multiple: true },
+  { icon: 'paperclip', label: 'Files', accept: `${documentTypes},image/*`, multiple: true },
+];
 
+function AttachTile({
+  source,
+  onPick,
+}: {
+  source: (typeof attachSources)[number];
+  onPick: (input: HTMLInputElement) => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <button type="button" className="attach-tile" onClick={() => input.current?.click()}>
+        <Icon name={source.icon} size={24} />
+        {source.label}
+      </button>
+      <input
+        ref={input}
+        type="file"
+        accept={source.accept}
+        capture={source.capture}
+        multiple={source.multiple}
+        hidden
+        onChange={(e) => onPick(e.currentTarget)}
+      />
+    </>
+  );
+}
+
+export function AttachSheet(props: AttachSheetProps) {
   useEffect(() => {
     if (!props.open) {
       return;
@@ -319,43 +331,10 @@ export function AttachSheet(props: AttachSheetProps) {
       <section className="bottom-sheet" role="dialog" aria-modal="true" aria-label="Add to message">
         <span className="sheet-handle" aria-hidden="true" />
         <div className="attach-tiles">
-          <button type="button" className="attach-tile" onClick={() => camera.current?.click()}>
-            <Icon name="camera" size={24} />
-            Camera
-          </button>
-          <button type="button" className="attach-tile" onClick={() => photos.current?.click()}>
-            <Icon name="image" size={24} />
-            Photos
-          </button>
-          <button type="button" className="attach-tile" onClick={() => files.current?.click()}>
-            <Icon name="paperclip" size={24} />
-            Files
-          </button>
+          {attachSources.map((source) => (
+            <AttachTile key={source.label} source={source} onPick={picked} />
+          ))}
         </div>
-        <input
-          ref={camera}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          hidden
-          onChange={(e) => picked(e.currentTarget)}
-        />
-        <input
-          ref={photos}
-          type="file"
-          accept="image/*"
-          multiple
-          hidden
-          onChange={(e) => picked(e.currentTarget)}
-        />
-        <input
-          ref={files}
-          type="file"
-          accept={`${documentTypes},image/*`}
-          multiple
-          hidden
-          onChange={(e) => picked(e.currentTarget)}
-        />
         <label className="sheet-model">
           <span>Model</span>
           <select
@@ -417,9 +396,7 @@ function AttachmentStrip({
             <img src={a.previewUrl} alt={a.name} />
           ) : (
             <span className="attachment-doc">
-              <span className="doc-badge">
-                {a.name.split('.').pop()?.slice(0, 4).toUpperCase()}
-              </span>
+              <span className="doc-badge">{docBadge(a.name)}</span>
               <span className="doc-text">
                 <b>{a.name}</b>
                 <small>{a.status === 'error' ? 'Failed' : describeSize(a.size)}</small>
@@ -531,7 +508,7 @@ export function Composer(props: ComposerProps) {
         setVoiceError('Leona heard nothing. Hold the phone closer and try again.');
       }
     } catch (e) {
-      setVoiceError(e instanceof Error ? e.message : String(e));
+      setVoiceError(errorText(e));
     } finally {
       setListening('idle');
       setLevel(0);
@@ -589,11 +566,7 @@ export function Composer(props: ComposerProps) {
           />
         </>
       )}
-      {props.error && (
-        <div role="alert" className="error">
-          {props.error}
-        </div>
-      )}
+      <ErrorAlert error={props.error} />
       {props.queued.length > 0 && (
         <ul className="queue" aria-label="Waiting to be sent">
           {props.queued.map((item) => (
