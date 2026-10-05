@@ -389,7 +389,7 @@ public partial class ToolRegistry(
                 case "search_documents" when _hasDocuments && documents is not null:
                     return await SearchDocumentsAsync(documents, args.Required("query", 400), ct);
                 default:
-                    return new ToolResult("Tool unavailable or disabled.", Status: ToolStatus.Unavailable);
+                    return Unavailable(call.Function.Name, input);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -402,6 +402,28 @@ public partial class ToolRegistry(
         {
             return new ToolResult($"Tool failed: {ex.Message}", Status: ToolStatus.Failed, Summary: ex.Message);
         }
+    }
+
+    // Small models call tools from earlier turns that this message does not have. Saying what to use
+    // instead keeps them from giving up.
+    private static ToolResult Unavailable(string name, ChatRequest input)
+    {
+        var toggle = name switch
+        {
+            "search_web" or "read_page" => input.Web ? null : "Web",
+            "list_files" or "search_files" or "read_file" or "read_document" or "create_file" or "edit_file" =>
+                input.Files ? null : "Files",
+            "run_command" => input.Commands ? null : "Terminal",
+            _ when PersonalTools.Names.Contains(name) => input.Accounts ? null : "Personal",
+            _ => null
+        };
+        var text = new StringBuilder($"{name} is not available for this message");
+        text.Append(toggle is null ? "." : $": the {toggle} toggle is off.");
+        if (input.Web && toggle != "Web")
+            text.Append(" Look it up with search_web and read_page instead.");
+        if (toggle is not null)
+            text.Append($" If that cannot answer it, tell the user to turn on {toggle}.");
+        return new ToolResult(text.ToString(), Status: ToolStatus.Unavailable);
     }
 
     // Mail, calendar and Home Assistant fail in many ways (network, TLS, authentication); report all as tool failures.
@@ -599,6 +621,13 @@ public partial class ToolRegistry(
         return new ToolResult(text.ToString(), Summary: hits.Count == 1 ? "1 passage" : $"{hits.Count} passages");
     }
 
+    private static readonly string[] s_loginSites =
+        ["facebook.com", "instagram.com", "x.com", "twitter.com", "linkedin.com", "tiktok.com", "threads.net"];
+
+    private static bool NeedsLogin(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+        s_loginSites.Any(site => uri.Host == site || uri.Host.EndsWith("." + site, StringComparison.Ordinal));
+
     private async Task<ToolResult> SearchAsync(string query, CancellationToken ct)
     {
         var searx = configuration["Tools:SearxngUrl"];
@@ -608,8 +637,10 @@ public partial class ToolRegistry(
                 Status: ToolStatus.Failed, Summary: "SearXNG is not configured");
 
         var results = await Searx.SearchAsync(clients.CreateClient("search"), searx, query, ct);
+        // Social media pages need a login that read_page does not have, so they go last and say so.
         var valid = results.Take(Limits.SearchResults)
             .Where(r => Uri.TryCreate(r.Url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
+            .OrderBy(r => NeedsLogin(r.Url))
             .ToList();
         // Result addresses come from the search provider, not from text the model was shown.
         foreach (var result in valid)
@@ -618,8 +649,13 @@ public partial class ToolRegistry(
             return new ToolResult("Search returned no results. Try a different query.", Summary: "No results");
         // Small models tend to answer from snippets alone, so the result ends with an explicit next step.
         return new ToolResult(
-            JsonSerializer.Serialize(valid.Select(r =>
-                new { title = r.Title, url = r.Url, snippet = r.Snippet[..Math.Min(r.Snippet.Length, 500)] })) +
+            JsonSerializer.Serialize(valid.Select(r => new
+            {
+                title = r.Title,
+                url = r.Url,
+                snippet = (NeedsLogin(r.Url) ? "[Needs a login: read_page cannot open it.] " : "") +
+                          r.Snippet[..Math.Min(r.Snippet.Length, 500)]
+            })) +
             "\n\nSnippets are not evidence. Call read_page on the most relevant result before answering.",
             Summary: valid.Count == 1 ? "1 result" : $"{valid.Count} results");
     }

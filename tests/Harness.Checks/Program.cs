@@ -45,7 +45,10 @@ try
     result = await registry.ExecuteAsync(Call("read_file", new { path = "link.txt" }), input, default);
     Check(result.Content.StartsWith("Tool failed:"), "symbolic links rejected");
     result = await registry.ExecuteAsync(Call("read_file", new { path = "note.txt" }), input with { Files = false }, default);
-    Check(result.Content.Contains("disabled"), "disabled tools cannot execute");
+    Check(result.Status == ToolStatus.Unavailable && result.Content.Contains("Files toggle is off"), "disabled tools cannot execute");
+    result = await registry.ExecuteAsync(Call("find_activities", new { words = "babyrytmik" }), input with { Web = true }, default);
+    Check(result.Status == ToolStatus.Unavailable && result.Content.Contains("search_web") && result.Content.Contains("turn on Personal"),
+        "an unavailable tool points to the web and the toggle that would allow it");
     result = await registry.ExecuteAsync(Call("read_file", new { path = "backend/Program.cs" }), input, default);
     Check(result.Status == ToolStatus.Failed && result.Content.Contains("Settings › Folders"), "a missing file points to Settings › Folders while only the workspace is added");
     result = await registry.ExecuteAsync(Call("read_page", new { url = "http://127.0.0.1/" }), input with { Web = true }, default);
@@ -173,6 +176,17 @@ try
     var found = PageReader.Read("Harbour", "https://example.com/harbour", article, "lighthouse storm", 0, 600);
     Check(found.Content.Contains("lighthouse keeper") && found.Summary!.Contains("passages"), "find returns matching passages instead of the beginning");
     var missing = PageReader.Read("Harbour", "https://example.com/harbour", article, "volcano", 0, 600);
+    var searchConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+    {
+        ["Tools:WorkspacePath"] = root, ["Tools:SearxngUrl"] = "http://searx.test/"
+    }).Build();
+    var searching = new ToolRegistry(new FakeClients(new FakeSearch()), web, files, searchConfig);
+    var hits = (await searching.ExecuteAsync(Call("search_web", new { query = "barnrytmik" }), input with { Web = true }, default)).Content;
+    Check(hits.IndexOf("svenskakyrkan", StringComparison.Ordinal) < hits.IndexOf("facebook", StringComparison.Ordinal) &&
+          hits.Contains("Needs a login"), "login-walled social media results go last and say they cannot be read");
+    Check(PageReader.Read("Kalender", "https://example.com/kalender", "Kalender\nHär finns församlingens samlingar.", null, 0, 600)
+            .Content.Contains("loads its content with a script") && !window.Content.Contains("with a script"),
+        "a page that reads as a few lines is flagged as probably loaded by a script");
     Check(missing.Content.StartsWith("No passages matched"), "find without matches falls back to the beginning");
 
     var defaults = new AppSettings();
@@ -888,15 +902,37 @@ try
         events.Add(e);
         return Task.CompletedTask;
     }, default);
-    Check(handler.LastMessages.Contains("## Veckorapport för jobbet") && events.Any(e => e.Text == "Using skill: Veckorapport för jobbet") &&
+    Check(handler.LastMessages.Contains("## Veckorapport för jobbet") &&
+          events.Any(e => e is { Type: "tool_finished", Name: SkillService.StepName, Text: "Veckorapport för jobbet" }) &&
           (await skillService.ListAsync(default)).Single().Uses == 1, "a matching skill reaches the model and is counted");
+    var skillSteps = (await new ConversationService(db).GetMessagesAsync(skillChat.Id, default)).Last().Tools;
+    Check(skillSteps.Any(s => s.Name == SkillService.StepName && s.Arguments.Contains("Veckorapport")),
+        "the skill a reply followed is saved with it");
     handler.Calls = 5; events.Clear();
     await skilledChat.GenerateAsync(skillChat.Id, new ChatRequest("Bara tre punkter, tack", "test", false), e =>
     {
         events.Add(e);
         return Task.CompletedTask;
     }, default);
-    Check(events.Any(e => e.Text == "Using skill: Veckorapport för jobbet"), "a short follow-up keeps the skill of the question it answers");
+    Check(events.Any(e => e is { Name: SkillService.StepName, Text: "Veckorapport för jobbet" }) &&
+          !handler.LastMessages.Contains("Followed the skill"), "a short follow-up keeps the skill of the question it answers");
+    var plainChat = new Conversation { Title = "Plain" };
+    db.Add(plainChat);
+    await db.SaveChangesAsync();
+    handler.Calls = 5; events.Clear();
+    await skilledChat.GenerateAsync(plainChat.Id, new ChatRequest("Gör veckorapporten för jobbet", "test", false, Scheduled: true), e =>
+    {
+        events.Add(e);
+        return Task.CompletedTask;
+    }, default);
+    Check(!events.Any(e => e.Name == SkillService.StepName), "scheduled tasks follow their own steps, not skills");
+    handler.Calls = 5; events.Clear();
+    await skilledChat.GenerateAsync(plainChat.Id, new ChatRequest("Och i Sverige?", "test", false), e =>
+    {
+        events.Add(e);
+        return Task.CompletedTask;
+    }, default);
+    Check(!events.Any(e => e.Name == SkillService.StepName), "a follow-up gets no skill when the question before followed none");
 
     gate.QuietPeriod = TimeSpan.Zero;
     var scheduledChat = new Conversation { Title = "Morning brief" };
@@ -1076,6 +1112,20 @@ sealed class FakeOllama : HttpMessageHandler
 sealed class TestClients : IHttpClientFactory
 {
     public HttpClient CreateClient(string name) => new();
+}
+// SearXNG answering with a social media post first.
+sealed class FakeSearch : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+        Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""
+                {"results":[
+                  {"title":"Barnverksamheten","url":"https://www.facebook.com/658913407540497/","content":"Babyrytmik idag"},
+                  {"title":"Barnrytmik","url":"https://www.svenskakyrkan.se/johanneberg/barnrytmik","content":"Mån kl. 10.30"}
+                ]}
+                """)
+        });
 }
 sealed class FakeClients(HttpMessageHandler handler) : IHttpClientFactory
 {

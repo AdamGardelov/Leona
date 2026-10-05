@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Harness.Data;
 using Harness.Models;
@@ -10,6 +11,9 @@ public record SkillInput(string Name, string WhenToUse, string Steps);
 
 public partial class SkillService(ChatDb db)
 {
+    // The step a reply shows when it followed a skill; it is saved with the chat but never recalled as an excerpt.
+    public const string StepName = "use_skill";
+
     private const int MaxSkills = 200;
 
     public Task<List<Skill>> ListAsync(CancellationToken ct) =>
@@ -57,6 +61,29 @@ public partial class SkillService(ChatDb db)
             .OrderByDescending(s => s.Score).ThenByDescending(s => s.Skill.Uses)
             .FirstOrDefault();
         return best.Skill;
+    }
+
+    // The skill a turn followed, from the step saved with it.
+    public async Task<Skill?> FollowedAsync(int userMessageId, CancellationToken ct)
+    {
+        var arguments = await db.ToolEvidence.AsNoTracking()
+            .Where(e => e.UserMessageId == userMessageId && e.ToolName == StepName)
+            .Select(e => e.Arguments).FirstOrDefaultAsync(ct);
+        if (arguments is null)
+            return null;
+        string? name;
+        try
+        {
+            name = JsonDocument.Parse(arguments).RootElement.TryGetProperty("name", out var value) ? value.GetString() : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        return name is null
+            ? null
+            : await db.Skills.AsNoTracking().FirstOrDefaultAsync(s => s.Name == name, ct);
     }
 
     public Task MarkUsedAsync(int id, CancellationToken ct) =>

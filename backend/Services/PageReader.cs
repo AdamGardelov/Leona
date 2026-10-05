@@ -12,6 +12,8 @@ public static partial class PageReader
 
     public record Passage(int Start, string Text);
 
+    private const int ScriptPageCharacters = 600;
+
     public static ToolResult Read(string title, string url, string text, string? find, int offset, int limit)
     {
         var sources = new[] { new SourceLink(title, url) };
@@ -44,9 +46,15 @@ public static partial class PageReader
                 end = space;
         }
 
+        // Calendars and shops often load their content with a script, which is not run here, and social media
+        // needs a login: such a page reads as a few lines, and an empty calendar says nothing about what is on.
         var footer = end < text.Length
             ? $"\n\n[Characters {offset}–{end} of {text.Length}. Call read_page with offset={end} to continue, or with find to jump to a topic.]"
-            : $"\n\n[End of page. Characters {offset}–{end} of {text.Length}.]";
+            : text.Length < ScriptPageCharacters
+                ? $"\n\n[End of page: only {text.Length} characters could be read. The page probably needs a login or loads its " +
+                  "content with a script, so do not conclude that something is missing from it. Read another result or search " +
+                  "for the specific thing instead.]"
+                : $"\n\n[End of page. Characters {offset}–{end} of {text.Length}.]";
         var summary = offset == 0 && end == text.Length
             ? $"Read {text.Length:N0} characters"
             : $"Characters {offset:N0}–{end:N0} of {text.Length:N0}";

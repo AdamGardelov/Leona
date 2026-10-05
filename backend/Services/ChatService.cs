@@ -119,7 +119,7 @@ public partial class ChatService(
             messages.Insert(0, new OllamaMessage("system", systemPrompt));
             var evidence = input.Scheduled
                 ? []
-                : await db.ToolEvidence.AsNoTracking().Where(e => e.ConversationId == id)
+                : await db.ToolEvidence.AsNoTracking().Where(e => e.ConversationId == id && e.ToolName != SkillService.StepName)
                     .OrderByDescending(e => e.Id).Take(4).ToListAsync(ct);
             if (evidence.Count > 0)
             {
@@ -160,20 +160,36 @@ public partial class ChatService(
                 tools.TrustLinksIn(text);
             if (attachments.Count > 0)
                 tools.Expose("attached files");
-            // A short follow-up such as "Pendling. Dator" keeps the skill of the question it answers.
-            var previousQuestion = history.LastOrDefault(m => m.Role == "user")?.Content;
-            var skill = skills is null
+            // A short follow-up such as "Pendling. Dator" keeps the skill the question it answers followed.
+            // Scheduled tasks bring their own steps, and their long prompts would match skills by chance.
+            var previousQuestion = history.LastOrDefault(m => m.Role == "user");
+            var skill = skills is null || input.Scheduled
                 ? null
                 : await skills.MatchAsync(input.Text, ct) ??
                   (previousQuestion is not null && input.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length <= 8
-                      ? await skills.MatchAsync(previousQuestion, ct)
+                      ? await skills.FollowedAsync(previousQuestion.Id, ct)
                       : null);
+            ToolEvidence? skillStep = null;
             if (skills is not null && skill is not null)
             {
                 messages.Add(new OllamaMessage("user", SkillService.Prompt(skill)));
                 messages.Add(new OllamaMessage("assistant", "I will follow that skill where it fits."));
                 await skills.MarkUsedAsync(skill.Id, ct);
-                await emit(new ChatEvent("status", $"Using skill: {skill.Name}"));
+                // Shown with the reply, so the user sees which skill shaped it.
+                var step = Guid.NewGuid().ToString();
+                var arguments = JsonSerializer.SerializeToElement(new { name = skill.Name });
+                await emit(new ChatEvent("tool_started") { Id = step, Name = SkillService.StepName, Arguments = arguments });
+                await emit(new ChatEvent("tool_finished", skill.Name)
+                {
+                    Id = step, Name = SkillService.StepName, Status = ToolStatus.Completed
+                });
+                skillStep = new ToolEvidence
+                {
+                    ToolName = SkillService.StepName,
+                    Arguments = arguments.GetRawText(),
+                    Excerpt = $"Followed the skill \"{skill.Name}\".",
+                    SourcesJson = "[]"
+                };
             }
 
             var capabilities = await ollama.GetCapabilitiesAsync(input.Model, ct);
@@ -205,8 +221,7 @@ public partial class ChatService(
                 await tools.PrepareAsync(input, ct);
                 var all = tools.Definitions(input);
                 // The previous question and the tools used lately keep follow-ups such as "yes, send it" working.
-                var previous = history.LastOrDefault(m => m.Role == "user")?.Content ?? "";
-                (definitions, _) = ToolSelector.Select(all, input.Text + "\n" + previous,
+                (definitions, _) = ToolSelector.Select(all, input.Text + "\n" + previousQuestion?.Content,
                     evidence.Select(e => e.ToolName), attachments.Any(a => a.Kind == UploadKind.Document),
                     attachments.Any(a => a.Kind == UploadKind.Image), tools.Vocabulary, project?.Files > 0);
                 if (definitions.Count < all.Count)
@@ -232,13 +247,14 @@ public partial class ChatService(
             }
             await db.SaveChangesAsync(ct);
             accepted = true;
-            if (projectPassages is not null)
+            // Steps taken before the user message existed are saved with it now.
+            foreach (var step in new[] { skillStep, projectPassages }.OfType<ToolEvidence>())
             {
-                projectPassages.ConversationId = id;
-                projectPassages.UserMessageId = userMessage.Id;
-                db.ToolEvidence.Add(projectPassages);
-                await db.SaveChangesAsync(ct);
+                step.ConversationId = id;
+                step.UserMessageId = userMessage.Id;
+                db.ToolEvidence.Add(step);
             }
+            await db.SaveChangesAsync(ct);
             await emit(new ChatEvent("status", "Generating response"));
 
             var sources = new Dictionary<string, SourceLink>();

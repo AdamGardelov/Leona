@@ -6,6 +6,7 @@ import { api, type Session, errorText } from './api';
 import { PairScreen } from './components/PairScreen';
 import { registerServiceWorker } from './components/NotificationsDialog';
 import { followSystemTextSize } from './textSize';
+import { followVisibleArea } from './viewport';
 
 // Other devices on the network see the pairing screen until they have a session.
 function Root() {
@@ -33,6 +34,7 @@ function Root() {
 
 void registerServiceWorker();
 followSystemTextSize();
+followVisibleArea();
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

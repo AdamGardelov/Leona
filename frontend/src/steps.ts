@@ -200,6 +200,12 @@ export function describeStep(
         title: running ? 'Checking the weather' : 'Checked the weather',
         detail: text(args.date) || 'today',
       };
+    case 'use_skill':
+      return {
+        icon: 'bolt',
+        title: running ? 'Following skill' : 'Followed skill',
+        detail: text(args.name),
+      };
     case 'search_documents':
       return {
         icon: 'fileSearch',

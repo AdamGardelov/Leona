@@ -211,12 +211,27 @@ a:focus-visible {
 }
 
 /* Layout */
+/* The page itself never scrolls or bounces: only the chat and panels inside it do. viewport.ts keeps it on
+   the visible area while the iPhone keyboard opens and closes. */
+html:has(.shell) {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+body:has(.shell) {
+  position: fixed;
+  top: var(--app-top, 0px);
+  left: 0;
+  right: 0;
+  height: var(--app-height, 100dvh);
+  overflow: hidden;
+  overscroll-behavior: none;
+}
 .shell {
   --left: 264px;
   --right: 320px;
   display: grid;
   grid-template-columns: var(--left) minmax(0, 1fr) var(--right);
-  height: 100dvh;
+  height: var(--app-height, 100dvh);
 }
 .shell > aside {
   grid-column: 1;
@@ -592,6 +607,7 @@ header h1 {
 .chat {
   flex: 1;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 32px 28px 0;
 }
 .thread {
@@ -627,6 +643,29 @@ article.user .bubble {
 }
 .label-model::before {
   content: '· ';
+}
+.label-skill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 14em;
+  padding: 1px 9px 1px 7px;
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 0.82em;
+  font-weight: 500;
+}
+.label-skill svg {
+  flex: none;
+}
+.label-skill-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 article .label {
   display: flex;

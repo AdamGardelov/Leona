@@ -174,16 +174,27 @@ const Reply = memo(function Reply({
       onClick: () => handlers.current.onInspect?.(),
     },
   ].filter((a) => a.shown);
+  // The skill a reply followed is shown by its name next to the model, not as a step.
+  const skill = m.tools?.find((step) => step.name === 'use_skill');
+  const skillName = typeof skill?.arguments.name === 'string' ? skill.arguments.name : '';
+  const steps = m.tools?.filter((step) => step !== skill) ?? [];
   return (
     <article className="assistant">
       <div className="label">
         <Mark size={16} />
         Leona
         {m.model && <span className="label-model">{m.model}</span>}
+        {skillName && (
+          <span className="label-skill" title={`Followed the skill “${skillName}”`}>
+            <Icon name="bolt" size={12} />
+            <span className="visually-hidden">Skill:</span>
+            <span className="label-skill-name">{skillName}</span>
+          </span>
+        )}
       </div>
-      {m.tools && m.tools.length > 0 && (
+      {steps.length > 0 && (
         <ol className="tool-steps" aria-label="Tool steps">
-          {m.tools.map((step, i) => (
+          {steps.map((step, i) => (
             <Step key={step.id ?? i} step={step} />
           ))}
         </ol>
