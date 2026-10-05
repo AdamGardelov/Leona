@@ -49,7 +49,8 @@ public partial class SkillService(ChatDb db)
         await db.Skills.Where(s => s.Id == id).ExecuteDeleteAsync(ct) > 0;
 
     // The skill whose name and description share the most words with the request, if it shares at least
-    // two (one for very short requests), so unrelated skills stay out of the prompt.
+    // two (one for very short requests, three for long ones, where two common words meet by chance), so
+    // unrelated skills stay out of the prompt.
     public async Task<Skill?> MatchAsync(string text, CancellationToken ct)
     {
         var terms = Words(text);
@@ -57,7 +58,7 @@ public partial class SkillService(ChatDb db)
             return null;
         var best = (await db.Skills.AsNoTracking().ToListAsync(ct))
             .Select(s => (Skill: s, Score: Words(s.Name + " " + s.WhenToUse).Count(terms.Contains)))
-            .Where(s => s.Score >= Math.Min(2, terms.Count))
+            .Where(s => s.Score >= Math.Min(terms.Count > 40 ? 3 : 2, terms.Count))
             .OrderByDescending(s => s.Score).ThenByDescending(s => s.Skill.Uses)
             .FirstOrDefault();
         return best.Skill;
@@ -130,7 +131,9 @@ public partial class SkillService(ChatDb db)
     [
         "the", "and", "for", "are", "you", "your", "with", "this", "that", "what", "how", "can", "was", "have", "when",
         "och", "att", "det", "som", "för", "med", "har", "inte", "den", "jag", "kan", "vad", "hur", "var", "min", "mitt",
-        "när", "ska", "vill", "mig", "use", "user", "asks", "ber"
+        "när", "ska", "vill", "mig", "use", "user", "asks", "ber", "eller", "till", "från", "ett", "men", "där", "här",
+        "dem", "sig", "sin", "sitt", "sina", "alla", "också", "bara", "sedan", "efter", "under", "över", "the", "and",
+        "for", "with", "from"
     ];
 
     private static HashSet<string> Words(string text) =>

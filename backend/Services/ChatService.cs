@@ -413,14 +413,15 @@ public partial class ChatService(
 
                 // Only the round that ends the answer decides whether the reply was cut off.
                 truncated = doneReason == "length";
-                // Small models sometimes end a turn without a word, often right after a tool. Ask once more;
-                // the request is not saved in the chat.
-                if (calls.Count == 0 && !truncated && !nudged && CleanReply(stepAnswer.ToString()).Length == 0)
+                // Small models sometimes end a turn without a word, often right after a tool, or reach for a tool
+                // after the budget is spent. Ask once more; the request is not saved in the chat.
+                if ((calls.Count == 0 || finalRound) && !truncated && !nudged && CleanReply(stepAnswer.ToString()).Length == 0)
                 {
                     nudged = true;
                     messages.Add(new OllamaMessage("user",
                         "You ended without replying. Answer my last message now, in my language, based on what the tools returned. " +
-                        "Do not say you did something unless a tool result shows it."));
+                        "Do not say you did something unless a tool result shows it." +
+                        (finalRound ? " No more tools can be called." : "")));
                     await emit(new ChatEvent("status", "The reply was empty; asking the model to answer"));
                     round--;
                     continue;

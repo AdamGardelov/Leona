@@ -118,7 +118,7 @@ public sealed partial class ResearchService(
                 try
                 {
                     var page = await web.ReadAsync(hit.Url, ct);
-                    var (title, text) = await PageTextExtractor.ExtractAsync(page, ct);
+                    var (title, text, _) = await PageTextExtractor.ExtractAsync(page, ct);
                     return (Hit: hit, Title: title == "Page" ? hit.Title : title, Text: Relevant(text, question));
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)

@@ -46,7 +46,7 @@ public sealed partial class ConcertService(
                 try
                 {
                     var page = await web.ReadAsync(url, ct);
-                    var (_, text) = await PageTextExtractor.ExtractAsync(page, ct);
+                    var (_, text, _) = await PageTextExtractor.ExtractAsync(page, ct);
                     // Calendars laid out as month, day, title and time become events; others are searched as text.
                     var parsed = ParseCalendar(VenueName(url), url, text, DateTime.Now);
                     if (parsed.Count >= 3)

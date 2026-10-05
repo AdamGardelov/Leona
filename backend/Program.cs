@@ -223,6 +223,7 @@ app.MapSkillEndpoints();
 app.MapTrustedSiteEndpoints();
 app.MapProjectEndpoints();
 app.MapDocumentEndpoints();
+app.MapImageEndpoints();
 app.MapMailEndpoints();
 app.MapSpeechEndpoints();
 app.MapAskEndpoints();

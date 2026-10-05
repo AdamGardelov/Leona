@@ -14,10 +14,12 @@ public static partial class PageReader
 
     private const int ScriptPageCharacters = 600;
 
-    public static ToolResult Read(string title, string url, string text, string? find, int offset, int limit)
+    // image is the page's own picture, which suggestions linking to the page may show.
+    public static ToolResult Read(string title, string url, string text, string? find, int offset, int limit,
+        string? image = null)
     {
         var sources = new[] { new SourceLink(title, url) };
-        var header = $"{title}\n{url}\n";
+        var header = $"{title}\n{url}\n" + (image is null ? "" : $"Image: {image}\n");
         var prefix = "";
         if (!string.IsNullOrWhiteSpace(find))
         {

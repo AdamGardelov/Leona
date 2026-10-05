@@ -165,6 +165,13 @@ try
     Check(extracted.Text.Contains("Åäö") && extracted.Text.Contains("truncated"), "HTTP charset and truncated page marker");
     extracted = await PageTextExtractor.ExtractAsync(page with { Charset = null }, default);
     Check(extracted.Text.Contains("Åäö"), "HTML meta charset detected from stream");
+    var shared = new FetchedPage("<head><meta property='og:image' content='/bilder/rytmik.jpg'></head><p>Barnrytmik</p>"u8.ToArray(),
+        "utf-8", "text/html", "https://www.svenskakyrkan.se/johanneberg/barnrytmik", false);
+    extracted = await PageTextExtractor.ExtractAsync(shared, default);
+    Check(extracted.Image == "https://www.svenskakyrkan.se/bilder/rytmik.jpg" &&
+          PageReader.Read("Barnrytmik", shared.Url, extracted.Text, null, 0, 600, extracted.Image).Content
+              .Contains("Image: https://www.svenskakyrkan.se/bilder/rytmik.jpg"),
+        "a page's shared picture is found and given with its text");
     var article = string.Join("\n", Enumerable.Range(0, 40).Select(i => i == 27
         ? "The lighthouse keeper recorded storm warnings every evening."
         : $"Paragraph {i} talks about ordinary harbour logistics and timetables."));
@@ -888,6 +895,9 @@ try
         "När jag ber om veckorapporten för jobbet", "1. Sök i mejlen efter veckans projekt.\n2. Sammanfatta i tre punkter."), default);
     Check((await skillService.MatchAsync("Kan du göra veckorapporten för jobbet?", default))?.Id == weekly.Id &&
           await skillService.MatchAsync("Vad är huvudstaden i Norge?", default) is null, "skills match related requests only");
+    var longPlan = "Föreslå vad vi kan göra idag med barnen efter jobbet. " + string.Join(" ", Enumerable.Range(1, 40).Select(i => $"ord{i}")) +
+                   " Skriv kort, som veckorapporten brukar vara.";
+    Check(await skillService.MatchAsync(longPlan, default) is null, "a long request needs more than two shared words to pick a skill");
     var draft = SkillService.ParseDraft("<think>x</think>NAME: Weekly report\nWHEN: When I ask for my weekly report.\nSTEPS:\n1. Search mail.\n2. Summarise.");
     Check(draft is { Name: "Weekly report" } && draft.Steps.StartsWith("1. Search mail.") && SkillService.ParseDraft("Sure! Here you go.") is null,
         "skill drafts are read from the model's reply");
@@ -1021,6 +1031,12 @@ try
         "job cards become one line each in a notification, and excluded brands are left out by title");
     Check(SchedulerService.Plain("Soligt idag.\n\n```activity\nVad: Sagostund\nPlats: Kulturhuset Kåken\nTid: 13:00–13:30\nLänk: https://x.se\n```\n") ==
           "Soligt idag.\n• Sagostund – Kulturhuset Kåken (13:00–13:30)", "day plan cards become one line each in a notification");
+    var withPhoto = ActivityService.Format([new ActivityService.Activity("Sagostund", "Kulturhuset Kåken", "13:00–13:30", null, "",
+        null, "Free", "https://goteborg.se/x", "Göteborgs Stad's calendar", Image: "https://s3.eu-central-1.amazonaws.com/gbg.images/a.jpg")],
+        new DateOnly(2026, 10, 5));
+    Check(withPhoto.Contains("Image: https://s3.eu-central-1.amazonaws.com/gbg.images/a.jpg"), "activities give their photo to the model");
+    Check(PublicWebClient.ImageType([0xFF, 0xD8, 0xFF, 0xE0]) == "image/jpeg" && PublicWebClient.ImageType("RIFF0000WEBPVP8 "u8.ToArray()) == "image/webp" &&
+          PublicWebClient.ImageType("<svg onload=alert(1)>"u8.ToArray()) is null, "pictures are recognised by their bytes, never as SVG");
     Check(ActivityService.OpenOn("Måndagar 9.30-11.30, onsdagar 13-15", new DateOnly(2026, 10, 3)) is false &&
           ActivityService.OpenOn("Måndagar 9.30-11.30", new DateOnly(2026, 10, 5)) &&
           ActivityService.OpenOn("mån - fre 10 - 20, lör - sön 10 - 17", new DateOnly(2026, 10, 3)) &&

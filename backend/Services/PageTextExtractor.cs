@@ -10,7 +10,8 @@ public static partial class PageTextExtractor
     // Upper bound on extracted text kept per page; read_page shows windows of it.
     public const int MaxCharacters = 300_000;
 
-    public static async Task<(string Title, string Text)> ExtractAsync(FetchedPage page, CancellationToken ct)
+    // Image is the picture the page offers for sharing (og:image), shown with suggestions that link to it.
+    public static async Task<(string Title, string Text, string? Image)> ExtractAsync(FetchedPage page, CancellationToken ct)
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         Encoding? encoding = null;
@@ -27,6 +28,7 @@ public static partial class PageTextExtractor
 
         string title;
         string body;
+        string? image = null;
         using var stream = new MemoryStream(page.Bytes);
         if (page.Mime == "text/plain")
         {
@@ -42,13 +44,17 @@ public static partial class PageTextExtractor
                 ? await parser.ParseDocumentAsync(stream, ct)
                 : await parser.ParseDocumentAsync(encoding.GetString(page.Bytes), ct);
             title = document.Title?.Trim() is { Length: > 0 } documentTitle ? documentTitle : "Page";
+            var shared = document.QuerySelector("meta[property='og:image'], meta[name='twitter:image']")
+                ?.GetAttribute("content")?.Trim();
+            if (Uri.TryCreate(new Uri(page.Url), shared, out var picture) && picture.Scheme == "https")
+                image = picture.AbsoluteUri;
             body = TextOf(document, "script,style,nav,footer,header,noscript,svg");
         }
 
         if (body.Length > MaxCharacters)
             body = body[..MaxCharacters];
         var suffix = page.Truncated ? " [Page truncated after 1 MB]" : "";
-        return (title, body + suffix);
+        return (title, body + suffix, image);
     }
 
     // The text of an HTML fragment, such as a mail body or a feed's description.

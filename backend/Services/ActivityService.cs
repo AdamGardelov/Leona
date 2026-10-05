@@ -42,11 +42,12 @@ public sealed partial class ActivityService(IHttpClientFactory clients)
 
     // Score: how well it suits small children (higher first); Ongoing: an exhibition or opening hours rather
     // than a time.
+    // Image is the source's photo of the activity, if it has one.
     public record Activity(string Title, string Place, string When, DateTime? Start, string Details, string? Age,
-        string? Price, string Link, string Source, int Score = 0, bool Ongoing = false);
+        string? Price, string Link, string Source, int Score = 0, bool Ongoing = false, string? Image = null);
 
     private record CityEvent(string Title, string Place, IReadOnlyList<(DateTime Start, DateTime? End)> Dates,
-        string Text, bool Free, string Link);
+        string Text, bool Free, string Link, string? Image);
 
     // Activities on the day whose text or place matches the words (default: small children), or that take
     // place at one of the places. Cancelled ones, ongoing ones closed that weekday and ones for children older
@@ -128,7 +129,10 @@ public sealed partial class ActivityService(IHttpClientFactory clients)
                 when, start == default ? null : day.ToDateTime(TimeOnly.FromDateTime(start)),
                 JobService.Summarize(description), Age(title + " " + description),
                 PageTextExtractor.HtmlToText(JsonPath.Text(item, "priceInformation")).Trim() is { Length: > 0 } price ? price : Free(description),
-                CityPage + JsonPath.Text(item, "id"), "Göteborgs Stad's calendar", score, ongoing));
+                CityPage + JsonPath.Text(item, "id"), "Göteborgs Stad's calendar", score, ongoing,
+                JsonPath.Text(item, "image", "host") is { Length: > 0 } host && JsonPath.Text(item, "image", "path") is { Length: > 0 } path
+                    ? host + path
+                    : null));
         }
 
         return found;
@@ -150,7 +154,7 @@ public sealed partial class ActivityService(IHttpClientFactory clients)
                 : first.Start.TimeOfDay == TimeSpan.Zero ? "See the event page" : $"From {first.Start:HH:mm}";
             found.Add(new Activity(e.Title, e.Place, when, day.ToDateTime(TimeOnly.FromDateTime(first.Start)),
                 JobService.Summarize(e.Text), Age(e.Title + " " + e.Text), e.Free ? "Free" : null, e.Link, "goteborg.com",
-                score, first.End is null || first.End.Value.Date != first.Start.Date));
+                score, first.End is null || first.End.Value.Date != first.Start.Date, e.Image));
         }
 
         return found;
@@ -188,7 +192,7 @@ public sealed partial class ActivityService(IHttpClientFactory clients)
                         PageTextExtractor.HtmlToText(JsonPath.Text(item, "excerpt", "rendered")),
                         info.TryGetProperty("pricing", out var pricing) && pricing.TryGetProperty("free", out var free) &&
                         free.ValueKind == JsonValueKind.True,
-                        link.Replace("://cms.goteborg.com/", "://www.goteborg.com/"));
+                        link.Replace("://cms.goteborg.com/", "://www.goteborg.com/"), FeaturedImage(item));
                 }
             }
 
@@ -208,7 +212,8 @@ public sealed partial class ActivityService(IHttpClientFactory clients)
         for (var page = 1; page <= 12; page++)
         {
             using var response = await client.GetAsync(
-                $"{GoteborgCom}events?categories={category}&per_page=100&page={page}&_fields=title,link,excerpt,information", ct);
+                $"{GoteborgCom}events?categories={category}&per_page=100&page={page}" +
+                "&_fields=title,link,excerpt,information,_links,_embedded&_embed=wp:featuredmedia", ct);
             if (!response.IsSuccessStatusCode)
                 break;
             var body = await response.Content.ReadAsStringAsync(ct);
@@ -219,6 +224,23 @@ public sealed partial class ActivityService(IHttpClientFactory clients)
         }
 
         return pages;
+    }
+
+    // The event's photo in a size fit for the chat, or the original when no smaller one is listed.
+    private static string? FeaturedImage(JsonElement item)
+    {
+        if (!item.TryGetProperty("_embedded", out var embedded) ||
+            !embedded.TryGetProperty("wp:featuredmedia", out var media) || media.ValueKind != JsonValueKind.Array ||
+            media.GetArrayLength() == 0)
+            return null;
+        var image = media[0];
+        foreach (var size in new[] { "medium_large", "large", "medium" })
+        {
+            if (JsonPath.Text(image, "media_details", "sizes", size, "source_url") is { Length: > 0 } url)
+                return url;
+        }
+
+        return JsonPath.Text(image, "source_url") is { Length: > 0 } original ? original : null;
     }
 
     private static readonly string[] s_weekdays = ["söndag", "måndag", "tisdag", "onsdag", "torsdag", "fredag", "lördag"];
@@ -267,6 +289,8 @@ public sealed partial class ActivityService(IHttpClientFactory clients)
             var facts = new[] { a.Age is null ? null : $"age {a.Age}", a.Price is null ? null : $"price {a.Price}", a.Source }
                 .Where(f => f is not null);
             text.AppendLine($"  {string.Join(" · ", facts)} · {a.Link}");
+            if (a.Image is not null)
+                text.AppendLine($"  Image: {a.Image}");
             if (a.Details.Length > 0)
                 text.AppendLine($"  {a.Details}");
         }

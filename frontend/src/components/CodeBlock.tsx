@@ -248,19 +248,73 @@ const activityKeys: Record<string, string> = {
   'bra att veta': 'why',
   länk: 'link',
   link: 'link',
+  bild: 'image',
+  image: 'image',
 };
 
+function hostOf(link: string) {
+  try {
+    return new URL(link).hostname.replace(/^www\./, '');
+  } catch {
+    return link;
+  }
+}
+
+// Laid out like a written suggestion rather than a form: the place's photo, a numbered title, when and
+// where, why it suits today, and where it comes from. Photos come through Leona, never straight from the site.
 function ActivityCard({ text }: { text: string }) {
   const item = parseFields(text, activityKeys);
-  return (
-    <FieldCard
-      title={item.title ?? 'Suggestion'}
-      subtitle={item.place}
-      tags={[item.time, item.age, item.cost]}
-      why={item.why}
-      link={firstLink(item.link)}
-      linkLabel="Read more"
+  const link = firstLink(item.link);
+  const image = firstLink(item.image);
+  const [broken, setBroken] = useState(false);
+  const facts = [item.time, item.place].filter(Boolean).join(' · ');
+  // "Se länken" stands in for a fact the sources did not give; it says nothing as a tag.
+  const tags = [item.age, item.cost].filter(
+    (tag): tag is string => !!tag && !/^se länken|^see the link/i.test(tag),
+  );
+  const photo = image && !broken && (
+    <img
+      src={`/api/images?url=${encodeURIComponent(image)}`}
+      alt=""
+      loading="lazy"
+      onError={() => setBroken(true)}
     />
+  );
+  return (
+    <section className="outing">
+      {photo &&
+        (link ? (
+          <a
+            className="outing-photo"
+            href={link}
+            target="_blank"
+            rel="noopener noreferrer"
+            tabIndex={-1}
+          >
+            {photo}
+          </a>
+        ) : (
+          <div className="outing-photo">{photo}</div>
+        ))}
+      <h4 className="outing-title">{item.title ?? 'Suggestion'}</h4>
+      {facts && <p className="outing-facts">{facts}</p>}
+      {item.why && <p className="outing-why">{item.why}</p>}
+      {(tags.length > 0 || link) && (
+        <div className="outing-foot">
+          {tags.map((tag) => (
+            <span key={tag} className="outing-tag">
+              {tag}
+            </span>
+          ))}
+          {link && (
+            <a className="source-chip" href={link} target="_blank" rel="noopener noreferrer">
+              <Icon name="globe" size={12} />
+              {hostOf(link)}
+            </a>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

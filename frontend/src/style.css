@@ -1171,6 +1171,81 @@ details p {
   font-size: calc(12px * var(--fs));
   color: var(--muted);
 }
+/* A suggestion from the day planner, numbered in the order the reply gives them. */
+.markdown {
+  counter-reset: outing;
+}
+.outing {
+  counter-increment: outing;
+  margin: 20px 0 24px;
+  display: grid;
+  gap: 4px;
+}
+.outing-photo {
+  display: block;
+  max-width: 560px;
+  aspect-ratio: 16 / 9;
+  margin-bottom: 8px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.outing-photo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.markdown .outing-title {
+  margin: 0;
+  font-size: 1.06em;
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--text);
+}
+.outing-title::before {
+  content: counter(outing) '. ';
+}
+.markdown .outing-facts {
+  margin: 0;
+  font-weight: 550;
+  color: var(--text-2);
+}
+.markdown .outing-why {
+  margin: 2px 0 0;
+  line-height: 1.55;
+  color: var(--text);
+}
+.outing-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.outing-tag,
+.markdown .source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.8em;
+  line-height: 1.6;
+}
+.outing-tag {
+  background: var(--accent-bg);
+  color: var(--text-2);
+}
+.markdown .source-chip {
+  border: 1px solid var(--border-soft);
+  background: var(--surface);
+  color: var(--muted);
+  text-decoration: none;
+}
+.markdown .source-chip:hover {
+  color: var(--text);
+}
 .markdown .job-link {
   display: inline-flex;
   align-items: center;

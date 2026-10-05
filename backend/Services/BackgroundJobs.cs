@@ -244,7 +244,7 @@ public sealed class WatchService(
         try
         {
             var page = await web.ReadAsync(watch.Url, ct);
-            var (_, text) = await PageTextExtractor.ExtractAsync(page, ct);
+            var (_, text, _) = await PageTextExtractor.ExtractAsync(page, ct);
             var (value, number) = AutomationService.Extract(text, watch.Find);
             var previous = watch.LastValue;
             var alert = watch.Below is { } limit

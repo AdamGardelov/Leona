@@ -55,7 +55,35 @@ public sealed class PublicWebClient : IDisposable
                && !(b[0] == 198 && (b[1] == 18 || b[1] == 19));
     }
 
-    public async Task<FetchedPage> ReadAsync(string url, CancellationToken ct)
+    public Task<FetchedPage> ReadAsync(string url, CancellationToken ct) =>
+        FetchAsync(url, mime => mime is "text/html" or "text/plain" or "application/xhtml+xml",
+            "Only HTML and plain-text pages can be read.", 1_000_000, ct);
+
+    // A picture for the chat, such as an event's photo. Sites label them loosely ("image/jpg", octet-stream),
+    // so the bytes decide what it is (ImageType); SVG, which can carry scripts, is never taken.
+    public Task<FetchedPage> ReadImageAsync(string url, CancellationToken ct) =>
+        FetchAsync(url, mime => mime is "application/octet-stream" or "binary/octet-stream" ||
+                                (mime.StartsWith("image/", StringComparison.Ordinal) && !mime.Contains("svg")),
+            "Only JPEG, PNG, WebP and GIF images can be shown.", 8_000_000, ct);
+
+    // The type of a picture from its first bytes, or null when it is none of the kinds the chat shows.
+    public static string? ImageType(byte[] bytes)
+    {
+        bool Starts(int at, params byte[] magic) =>
+            bytes.Length >= at + magic.Length && bytes.AsSpan(at, magic.Length).SequenceEqual(magic);
+        if (Starts(0, 0xFF, 0xD8, 0xFF))
+            return "image/jpeg";
+        if (Starts(0, 0x89, 0x50, 0x4E, 0x47))
+            return "image/png";
+        if (Starts(0, (byte)'G', (byte)'I', (byte)'F', (byte)'8'))
+            return "image/gif";
+        return Starts(0, (byte)'R', (byte)'I', (byte)'F', (byte)'F') && Starts(8, (byte)'W', (byte)'E', (byte)'B', (byte)'P')
+            ? "image/webp"
+            : null;
+    }
+
+    private async Task<FetchedPage> FetchAsync(string url, Func<string, bool> accepts, string refusal, int maxBytes,
+        CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
@@ -76,8 +104,8 @@ public sealed class PublicWebClient : IDisposable
             response.EnsureSuccessStatusCode();
 
             var mime = response.Content.Headers.ContentType?.MediaType ?? "";
-            if (mime is not ("text/html" or "text/plain" or "application/xhtml+xml"))
-                throw new ArgumentException("Only HTML and plain-text pages can be read.");
+            if (!accepts(mime))
+                throw new ArgumentException(refusal);
 
             await using var stream = await response.Content.ReadAsStreamAsync(ct);
             using var data = new MemoryStream();
@@ -87,7 +115,7 @@ public sealed class PublicWebClient : IDisposable
 
             while ((count = await stream.ReadAsync(buffer, ct)) > 0)
             {
-                var remaining = 1_000_000 - (int)data.Length;
+                var remaining = maxBytes - (int)data.Length;
                 await data.WriteAsync(buffer.AsMemory(0, Math.Min(count, remaining)), ct);
                 if (count > remaining)
                 {

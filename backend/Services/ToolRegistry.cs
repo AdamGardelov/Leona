@@ -17,7 +17,7 @@ public partial class ToolRegistry(
     DocumentIndex? documents = null)
 {
     // Pages and documents read during a run are cached so offset, start and find calls do not reload them.
-    private readonly Dictionary<string, (string Title, string Text, string Url)> _pages = new();
+    private readonly Dictionary<string, (string Title, string Text, string Url, string? Image)> _pages = new();
     private readonly Dictionary<string, DocumentReader.Extracted> _documents = new();
     private IReadOnlyDictionary<string, string>? _folders;
     private readonly HashSet<string> _trustedUrls = new(StringComparer.Ordinal);
@@ -596,11 +596,11 @@ public partial class ToolRegistry(
         {
             var fetched = await web.ReadAsync(url, ct);
             var extracted = await PageTextExtractor.ExtractAsync(fetched, ct);
-            page = (extracted.Title, extracted.Text, fetched.Url);
+            page = (extracted.Title, extracted.Text, fetched.Url, extracted.Image);
             _pages[url] = page;
         }
 
-        return PageReader.Read(page.Title, page.Url, page.Text, find, offset, Limits.PageCharacters);
+        return PageReader.Read(page.Title, page.Url, page.Text, find, offset, Limits.PageCharacters, page.Image);
     }
 
     private async Task<ToolResult> SearchDocumentsAsync(DocumentIndex index, string query, CancellationToken ct)
