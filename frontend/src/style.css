@@ -1171,12 +1171,8 @@ details p {
   font-size: calc(12px * var(--fs));
   color: var(--muted);
 }
-/* A suggestion from the day planner, numbered in the order the reply gives them. */
-.markdown {
-  counter-reset: outing;
-}
+/* A suggestion from the day planner. */
 .outing {
-  counter-increment: outing;
   margin: 20px 0 24px;
   display: grid;
   gap: 4px;
@@ -1203,8 +1199,13 @@ details p {
   line-height: 1.35;
   color: var(--text);
 }
-.outing-title::before {
-  content: counter(outing) '. ';
+.markdown .outing-label {
+  margin: 0;
+  font-size: 0.74em;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
 }
 .markdown .outing-facts {
   margin: 0;

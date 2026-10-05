@@ -250,7 +250,59 @@ const activityKeys: Record<string, string> = {
   link: 'link',
   bild: 'image',
   image: 'image',
+  etikett: 'label',
+  label: 'label',
 };
+
+// A short heading line a small model writes before a suggestion, such as "1. **Huvudförslag:**", or null.
+// It must look like a heading (a list number, #, bold, or a closing colon) and be a few words long, so the
+// day's opening sentence never counts.
+function headingLabel(line: string) {
+  const match = line.match(/^\s*(#{1,6}\s+)?(\d+[.)]\s+|[-*+]\s+)?(.+?)\s*$/);
+  if (!match || match[3].includes('`')) {
+    return null;
+  }
+  const body = match[3];
+  const bold = /^(\*\*|__).+(\*\*|__):?$/.test(body);
+  if (!match[1] && !match[2] && !bold && !/:\s*(\*\*|__)?$/.test(body)) {
+    return null;
+  }
+  const label = body
+    .replace(/\*\*|__/g, '')
+    .replace(/:\s*$/, '')
+    .split(':')[0]
+    .trim();
+  return label && label.split(/\s+/).length <= 6 ? label : null;
+}
+
+// Moves such a heading into the suggestion as its label, so one suggestion never shows two headings or
+// two numbers. A suggestion with a label of its own keeps it, and the heading line goes.
+export function labelActivities(text: string) {
+  const lines = text.split('\n');
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*```activity\s*$/i.test(line)) {
+      let previous = out.length - 1;
+      while (previous >= 0 && out[previous].trim() === '') {
+        previous--;
+      }
+      const label = previous >= 0 ? headingLabel(out[previous]) : null;
+      if (label) {
+        const end = lines.findIndex((l, n) => n > i && /^\s*```\s*$/.test(l));
+        const block = lines.slice(i + 1, end < 0 ? undefined : end);
+        out.length = previous;
+        out.push('', line);
+        if (!block.some((l) => /^\s*(etikett|label)\s*:/i.test(l))) {
+          out.push(`Etikett: ${label}`);
+        }
+        continue;
+      }
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
 
 function hostOf(link: string) {
   try {
@@ -296,6 +348,7 @@ function ActivityCard({ text }: { text: string }) {
         ) : (
           <div className="outing-photo">{photo}</div>
         ))}
+      {item.label && <p className="outing-label">{item.label}</p>}
       <h4 className="outing-title">{item.title ?? 'Suggestion'}</h4>
       {facts && <p className="outing-facts">{facts}</p>}
       {item.why && <p className="outing-why">{item.why}</p>}

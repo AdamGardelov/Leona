@@ -3,7 +3,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AttachmentRef, Message, ToolStep } from '../api';
 import { describeSize, docBadge } from '../attachments';
-import { CodeBlock, CopyButton, DraftCard, MailStepCard } from './CodeBlock';
+import { CodeBlock, CopyButton, DraftCard, labelActivities, MailStepCard } from './CodeBlock';
 import { ImageViewerProvider, useOpenImage } from './ImageViewer';
 import { MailList } from './MailList';
 import { Icon, Mark, type IconName } from '../icons';
@@ -233,7 +233,7 @@ const Reply = memo(function Reply({
       {(m.content || !busy) && (
         <div className="markdown">
           <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-            {m.content || 'No answer received.'}
+            {m.content ? labelActivities(m.content) : 'No answer received.'}
           </ReactMarkdown>
         </div>
       )}
